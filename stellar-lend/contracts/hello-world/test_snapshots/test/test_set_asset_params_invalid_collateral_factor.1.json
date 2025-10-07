@@ -6,7 +6,6 @@
   "auth": [
     [],
     [],
-    [],
     []
   ],
   "ledger": {
@@ -48,59 +47,6 @@
                         },
                         "val": {
                           "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "asset_params"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                              },
-                              "val": {
-                                "map": [
-                                  {
-                                    "key": {
-                                      "symbol": "borrow_enabled"
-                                    },
-                                    "val": {
-                                      "bool": true
-                                    }
-                                  },
-                                  {
-                                    "key": {
-                                      "symbol": "collateral_factor"
-                                    },
-                                    "val": {
-                                      "i128": {
-                                        "hi": 0,
-                                        "lo": 75000000
-                                      }
-                                    }
-                                  },
-                                  {
-                                    "key": {
-                                      "symbol": "cross_enabled"
-                                    },
-                                    "val": {
-                                      "bool": true
-                                    }
-                                  },
-                                  {
-                                    "key": {
-                                      "symbol": "deposit_enabled"
-                                    },
-                                    "val": {
-                                      "bool": true
-                                    }
-                                  }
-                                ]
-                              }
-                            }
-                          ]
                         }
                       },
                       {

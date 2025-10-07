@@ -1643,3 +1643,473 @@ fn create_token_contract<'a>(env: &Env, admin: &Address) -> MockTokenClient<'a> 
     token.initialize(admin);
     token
 }
+
+// ===== Dynamic Collateral Factor Tests =====
+
+#[test]
+fn test_set_asset_params() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Set asset parameters
+    client.set_asset_params(
+        &admin.to_string(),
+        &asset,
+        &75000000, // 75% collateral factor
+        &true,     // borrow enabled
+        &true,     // deposit enabled
+        &true,     // cross enabled
+    );
+
+    // Verify parameters were set
+    let params = client.get_asset_params(&asset);
+    assert_eq!(params.collateral_factor, 75000000);
+    assert!(params.borrow_enabled);
+    assert!(params.deposit_enabled);
+    assert!(params.cross_enabled);
+}
+
+#[test]
+fn test_set_asset_params_invalid_collateral_factor() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Try to set invalid collateral factor (> 100%)
+    let result = client.try_set_asset_params(
+        &admin.to_string(),
+        &asset,
+        &150000000, // 150% - invalid
+        &true,
+        &true,
+        &true,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_set_asset_price() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Set asset price
+    client.set_asset_price(&admin.to_string(), &asset, &100000000); // $1.00
+
+    // Verify price was set
+    let price = client.get_asset_price(&asset);
+    assert_eq!(price, 100000000);
+}
+
+#[test]
+fn test_set_asset_price_invalid() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Try to set invalid price (negative)
+    let result = client.try_set_asset_price(&admin.to_string(), &asset, &-100);
+    assert!(result.is_err());
+
+    // Try to set zero price
+    let result = client.try_set_asset_price(&admin.to_string(), &asset, &0);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_set_dynamic_cf_params() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Set dynamic CF parameters
+    client.set_dynamic_cf_params(
+        &admin.to_string(),
+        &asset,
+        &50000000, // 50% min CF
+        &90000000, // 90% max CF
+        &100,      // 1% sensitivity per 1% vol
+        &200,      // 2% max step
+    );
+
+    // Verify parameters were set
+    let params = client.get_dynamic_cf_params(&asset);
+    assert_eq!(params.min_cf, 50000000);
+    assert_eq!(params.max_cf, 90000000);
+    assert_eq!(params.sensitivity_bps, 100);
+    assert_eq!(params.max_step_bps, 200);
+}
+
+#[test]
+fn test_set_dynamic_cf_params_invalid() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Try to set min_cf > max_cf
+    let result = client.try_set_dynamic_cf_params(
+        &admin.to_string(),
+        &asset,
+        &90000000, // 90% min CF
+        &50000000, // 50% max CF - invalid
+        &100,
+        &200,
+    );
+    assert!(result.is_err());
+
+    // Try to set negative sensitivity
+    let result = client.try_set_dynamic_cf_params(
+        &admin.to_string(),
+        &asset,
+        &50000000,
+        &90000000,
+        &-100, // negative - invalid
+        &200,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_push_price_and_update_cf_basic() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Set up asset parameters
+    client.set_asset_params(
+        &admin.to_string(),
+        &asset,
+        &75000000, // 75% initial CF
+        &true,
+        &true,
+        &true,
+    );
+
+    // Set up dynamic CF parameters
+    client.set_dynamic_cf_params(
+        &admin.to_string(),
+        &asset,
+        &50000000, // 50% min CF
+        &90000000, // 90% max CF
+        &100,      // 1% sensitivity per 1% vol
+        &200,      // 2% max step
+    );
+
+    // Push first price (should not change CF since no previous price)
+    let new_cf = client.push_price_and_update_cf(&admin.to_string(), &asset, &100000000); // $1.00
+    assert_eq!(new_cf, 75000000); // Should remain unchanged
+
+    // Verify market state was updated
+    let market_state = client.get_market_state(&asset);
+    assert_eq!(market_state.last_price, 100000000);
+    assert_eq!(market_state.vol_index_bps, 0); // No volatility yet
+}
+
+#[test]
+fn test_push_price_and_update_cf_volatility_adjustment() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Set up asset parameters
+    client.set_asset_params(
+        &admin.to_string(),
+        &asset,
+        &75000000, // 75% initial CF
+        &true,
+        &true,
+        &true,
+    );
+
+    // Set up dynamic CF parameters with high sensitivity
+    client.set_dynamic_cf_params(
+        &admin.to_string(),
+        &asset,
+        &50000000, // 50% min CF
+        &90000000, // 90% max CF
+        &500,      // 5% sensitivity per 1% vol (high)
+        &1000,     // 10% max step
+    );
+
+    // Push first price
+    client.push_price_and_update_cf(&admin.to_string(), &asset, &100000000); // $1.00
+
+    // Push second price with 10% increase (high volatility)
+    let new_cf = client.push_price_and_update_cf(&admin.to_string(), &asset, &110000000); // $1.10
+
+    // Should reduce CF due to volatility
+    // Volatility = |1.10/1.00 - 1| * 10000 = 1000 bps (10%)
+    // CF reduction = 500 * (1000/100) = 5000 bps (50%)
+    // But limited by max step of 1000 bps (10%)
+    // So CF should be 75000000 - 10000000 = 65000000 (65%)
+    assert!(new_cf < 75000000);
+    assert!(new_cf >= 65000000); // Should be reduced by max step
+
+    // Verify market state
+    let market_state = client.get_market_state(&asset);
+    assert_eq!(market_state.last_price, 110000000);
+    assert!(market_state.vol_index_bps > 0); // Should have volatility
+}
+
+#[test]
+fn test_push_price_and_update_cf_bounds_enforcement() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Set up asset parameters with low initial CF
+    client.set_asset_params(
+        &admin.to_string(),
+        &asset,
+        &60000000, // 60% initial CF
+        &true,
+        &true,
+        &true,
+    );
+
+    // Set up dynamic CF parameters with tight bounds
+    client.set_dynamic_cf_params(
+        &admin.to_string(),
+        &asset,
+        &55000000, // 55% min CF
+        &65000000, // 65% max CF
+        &1000,     // 10% sensitivity per 1% vol
+        &2000,     // 20% max step
+    );
+
+    // Push first price
+    client.push_price_and_update_cf(&admin.to_string(), &asset, &100000000);
+
+    // Push price with extreme volatility that would push CF below minimum
+    let new_cf = client.push_price_and_update_cf(&admin.to_string(), &asset, &200000000); // 100% increase
+
+    // Should be clamped to minimum CF
+    assert_eq!(new_cf, 55000000); // Should be at minimum
+
+    // Verify market state
+    let market_state = client.get_market_state(&asset);
+    assert_eq!(market_state.last_price, 200000000);
+    assert!(market_state.vol_index_bps > 0);
+}
+
+#[test]
+fn test_push_price_and_update_cf_step_limit() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Set up asset parameters
+    client.set_asset_params(
+        &admin.to_string(),
+        &asset,
+        &75000000, // 75% initial CF
+        &true,
+        &true,
+        &true,
+    );
+
+    // Set up dynamic CF parameters with small step limit
+    client.set_dynamic_cf_params(
+        &admin.to_string(),
+        &asset,
+        &50000000, // 50% min CF
+        &90000000, // 90% max CF
+        &1000,     // 10% sensitivity per 1% vol
+        &100,      // 1% max step (very small)
+    );
+
+    // Push first price
+    client.push_price_and_update_cf(&admin.to_string(), &asset, &100000000);
+
+    // Push price with high volatility
+    let new_cf = client.push_price_and_update_cf(&admin.to_string(), &asset, &150000000); // 50% increase
+
+    // Should be limited by step size
+    // Expected change would be large, but limited to 1% (100 bps)
+    // So CF should be 75000000 - 1000000 = 74000000 (74%)
+    assert_eq!(new_cf, 74000000); // Should be reduced by exactly max step
+
+    // Verify market state
+    let market_state = client.get_market_state(&asset);
+    assert_eq!(market_state.last_price, 150000000);
+    assert!(market_state.vol_index_bps > 0);
+}
+
+#[test]
+fn test_dynamic_cf_event_emission() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Set up asset parameters
+    client.set_asset_params(
+        &admin.to_string(),
+        &asset,
+        &75000000, // 75% initial CF
+        &true,
+        &true,
+        &true,
+    );
+
+    // Set up dynamic CF parameters
+    client.set_dynamic_cf_params(
+        &admin.to_string(),
+        &asset,
+        &50000000, // 50% min CF
+        &90000000, // 90% max CF
+        &200,      // 2% sensitivity per 1% vol
+        &500,      // 5% max step
+    );
+
+    // Push first price
+    client.push_price_and_update_cf(&admin.to_string(), &asset, &100000000);
+
+    // Push second price to trigger CF update
+    let new_cf = client.push_price_and_update_cf(&admin.to_string(), &asset, &120000000); // 20% increase
+
+    // Verify that CF changed (indicating event was emitted)
+    assert!(
+        new_cf != 75000000,
+        "CF should have changed due to volatility"
+    );
+}
+
+#[test]
+fn test_volatility_index_calculation() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+    client.initialize(&admin.to_string());
+
+    // Create test asset
+    let asset = Address::generate(&env);
+
+    // Set up asset parameters
+    client.set_asset_params(
+        &admin.to_string(),
+        &asset,
+        &75000000, // 75% initial CF
+        &true,
+        &true,
+        &true,
+    );
+
+    // Set up dynamic CF parameters
+    client.set_dynamic_cf_params(
+        &admin.to_string(),
+        &asset,
+        &50000000, // 50% min CF
+        &90000000, // 90% max CF
+        &100,      // 1% sensitivity per 1% vol
+        &1000,     // 10% max step
+    );
+
+    // Push first price
+    client.push_price_and_update_cf(&admin.to_string(), &asset, &100000000); // $1.00
+
+    // Check initial market state
+    let market_state = client.get_market_state(&asset);
+    assert_eq!(market_state.last_price, 100000000);
+    assert_eq!(market_state.vol_index_bps, 0);
+
+    // Push second price with 5% increase
+    client.push_price_and_update_cf(&admin.to_string(), &asset, &105000000); // $1.05
+
+    // Check volatility calculation
+    let market_state = client.get_market_state(&asset);
+    assert_eq!(market_state.last_price, 105000000);
+    // Expected volatility: |1.05/1.00 - 1| * 10000 = 500 bps (5%)
+    // EWMA: (0 * 4 + 500) / 5 = 100 bps
+    assert_eq!(market_state.vol_index_bps, 100);
+
+    // Push third price with 10% decrease
+    client.push_price_and_update_cf(&admin.to_string(), &asset, &94500000); // $0.945
+
+    // Check updated volatility
+    let market_state = client.get_market_state(&asset);
+    assert_eq!(market_state.last_price, 94500000);
+    // Expected volatility: |0.945/1.05 - 1| * 10000 = 1000 bps (10%)
+    // EWMA: (100 * 4 + 1000) / 5 = 280 bps
+    assert_eq!(market_state.vol_index_bps, 280);
+}

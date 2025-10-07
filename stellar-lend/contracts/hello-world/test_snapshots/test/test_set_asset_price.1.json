@@ -52,7 +52,7 @@
                       },
                       {
                         "key": {
-                          "symbol": "asset_params"
+                          "symbol": "asset_prices"
                         },
                         "val": {
                           "map": [
@@ -61,43 +61,10 @@
                                 "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                               },
                               "val": {
-                                "map": [
-                                  {
-                                    "key": {
-                                      "symbol": "borrow_enabled"
-                                    },
-                                    "val": {
-                                      "bool": true
-                                    }
-                                  },
-                                  {
-                                    "key": {
-                                      "symbol": "collateral_factor"
-                                    },
-                                    "val": {
-                                      "i128": {
-                                        "hi": 0,
-                                        "lo": 75000000
-                                      }
-                                    }
-                                  },
-                                  {
-                                    "key": {
-                                      "symbol": "cross_enabled"
-                                    },
-                                    "val": {
-                                      "bool": true
-                                    }
-                                  },
-                                  {
-                                    "key": {
-                                      "symbol": "deposit_enabled"
-                                    },
-                                    "val": {
-                                      "bool": true
-                                    }
-                                  }
-                                ]
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 100000000
+                                }
                               }
                             }
                           ]

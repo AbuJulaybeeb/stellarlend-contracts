@@ -1978,6 +1978,69 @@ impl InterestRateState {
     }
 }
 
+/// Parameters for a specific asset supported by cross-asset functionality
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AssetParams {
+    /// Collateral factor (scaled by 1e8). 75% => 75000000
+    pub collateral_factor: i128,
+    /// Borrowing enabled for this asset
+    pub borrow_enabled: bool,
+    /// Deposits enabled for this asset
+    pub deposit_enabled: bool,
+    /// Cross-asset features enabled for this asset
+    pub cross_enabled: bool,
+}
+
+impl Default for AssetParams {
+    fn default() -> Self {
+        Self {
+            collateral_factor: 75000000, // 75%
+            borrow_enabled: true,
+            deposit_enabled: true,
+            cross_enabled: true,
+        }
+    }
+}
+
+/// Dynamic CF parameters per asset
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct DynamicCFParams {
+    pub min_cf: i128,          // 0..=1e8
+    pub max_cf: i128,          // 0..=1e8
+    pub sensitivity_bps: i128, // how much to reduce per 1% vol (bps)
+    pub max_step_bps: i128,    // max change per update (bps)
+}
+
+impl Default for DynamicCFParams {
+    fn default() -> Self {
+        Self {
+            min_cf: 50000000,     // 50% minimum
+            max_cf: 90000000,     // 90% maximum
+            sensitivity_bps: 100, // 1% reduction per 1% volatility
+            max_step_bps: 200,    // 2% max change per update
+        }
+    }
+}
+
+/// Market state tracking for dynamic CF
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct MarketState {
+    pub last_price: i128,    // last known price in 1e8 scale
+    pub vol_index_bps: i128, // simple volatility index in bps
+}
+
+impl MarketState {
+    pub fn initial() -> Self {
+        Self {
+            last_price: 0,
+            vol_index_bps: 0,
+        }
+    }
+}
+
 /// Risk management configuration
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -2207,6 +2270,75 @@ impl InterestRateManager {
         }
 
         position.last_accrual_time = current_time;
+    }
+}
+
+/// Asset registry storage for dynamic CF management
+pub struct AssetRegistryStorage;
+
+impl AssetRegistryStorage {
+    fn params_key(env: &Env) -> Symbol {
+        Symbol::new(env, "asset_params")
+    }
+
+    fn prices_key(env: &Env) -> Symbol {
+        Symbol::new(env, "asset_prices")
+    }
+
+    fn market_state_key(env: &Env) -> Symbol {
+        Symbol::new(env, "market_state")
+    }
+
+    fn dyn_params_key(env: &Env) -> Symbol {
+        Symbol::new(env, "dyn_cf_params")
+    }
+
+    pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
+        env.storage()
+            .instance()
+            .get(&Self::params_key(env))
+            .unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_params_map(env: &Env, map: &Map<Address, AssetParams>) {
+        env.storage().instance().set(&Self::params_key(env), map);
+    }
+
+    pub fn get_prices_map(env: &Env) -> Map<Address, i128> {
+        env.storage()
+            .instance()
+            .get(&Self::prices_key(env))
+            .unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_prices_map(env: &Env, map: &Map<Address, i128>) {
+        env.storage().instance().set(&Self::prices_key(env), map);
+    }
+
+    pub fn get_market_state(env: &Env) -> Map<Address, MarketState> {
+        env.storage()
+            .instance()
+            .get(&Self::market_state_key(env))
+            .unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_market_state(env: &Env, map: &Map<Address, MarketState>) {
+        env.storage()
+            .instance()
+            .set(&Self::market_state_key(env), map);
+    }
+
+    pub fn get_dyn_params(env: &Env) -> Map<Address, DynamicCFParams> {
+        env.storage()
+            .instance()
+            .get(&Self::dyn_params_key(env))
+            .unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_dyn_params(env: &Env, map: &Map<Address, DynamicCFParams>) {
+        env.storage()
+            .instance()
+            .set(&Self::dyn_params_key(env), map);
     }
 }
 
@@ -3905,5 +4037,261 @@ impl Contract {
         ProtocolConfig::require_admin(&env, &admin)?;
 
         amm::AMMRegistry::activate_pair(&env, &asset_a, &asset_b)
+    }
+
+    // ---- Dynamic Collateral Factor Functions ----
+
+    /// Set asset parameters for cross-asset functionality
+    /// Admin-only function to configure asset parameters
+    ///
+    /// # Arguments
+    /// * `caller` - Admin address (must match contract admin)
+    /// * `asset` - Asset address to configure
+    /// * `collateral_factor` - Collateral factor (scaled by 1e8, e.g., 75% = 75000000)
+    /// * `borrow_enabled` - Whether borrowing is enabled for this asset
+    /// * `deposit_enabled` - Whether deposits are enabled for this asset
+    /// * `cross_enabled` - Whether cross-asset features are enabled
+    pub fn set_asset_params(
+        env: Env,
+        caller: String,
+        asset: Address,
+        collateral_factor: i128,
+        borrow_enabled: bool,
+        deposit_enabled: bool,
+        cross_enabled: bool,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+        let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+
+        if !(0..=100000000).contains(&collateral_factor) {
+            return Err(ProtocolError::InvalidInput);
+        }
+
+        let mut map = AssetRegistryStorage::get_params_map(&env);
+        let params = AssetParams {
+            collateral_factor,
+            borrow_enabled,
+            deposit_enabled,
+            cross_enabled,
+        };
+        map.set(asset, params);
+        AssetRegistryStorage::put_params_map(&env, &map);
+        Ok(())
+    }
+
+    /// Set price for an asset in 1e8 scale (oracle/admin)
+    /// Admin-only function to set asset prices
+    ///
+    /// # Arguments
+    /// * `caller` - Admin address (must match contract admin)
+    /// * `asset` - Asset address
+    /// * `price` - Price in 1e8 scale
+    pub fn set_asset_price(
+        env: Env,
+        caller: String,
+        asset: Address,
+        price: i128,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+        let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+
+        if price <= 0 {
+            return Err(ProtocolError::InvalidInput);
+        }
+
+        let mut map = AssetRegistryStorage::get_prices_map(&env);
+        map.set(asset, price);
+        AssetRegistryStorage::put_prices_map(&env, &map);
+        Ok(())
+    }
+
+    /// Set dynamic CF parameters for an asset
+    /// Admin-only function to configure dynamic collateral factor parameters
+    ///
+    /// # Arguments
+    /// * `caller` - Admin address (must match contract admin)
+    /// * `asset` - Asset address to configure
+    /// * `min_cf` - Minimum collateral factor (scaled by 1e8)
+    /// * `max_cf` - Maximum collateral factor (scaled by 1e8)
+    /// * `sensitivity_bps` - Volatility sensitivity in basis points
+    /// * `max_step_bps` - Maximum step change per update in basis points
+    pub fn set_dynamic_cf_params(
+        env: Env,
+        caller: String,
+        asset: Address,
+        min_cf: i128,
+        max_cf: i128,
+        sensitivity_bps: i128,
+        max_step_bps: i128,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+        let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+
+        if !(0..=100000000).contains(&min_cf)
+            || !(0..=100000000).contains(&max_cf)
+            || min_cf > max_cf
+        {
+            return Err(ProtocolError::InvalidInput);
+        }
+
+        if sensitivity_bps < 0 || max_step_bps < 0 {
+            return Err(ProtocolError::InvalidInput);
+        }
+
+        let mut dyn_map = AssetRegistryStorage::get_dyn_params(&env);
+        let dcf = DynamicCFParams {
+            min_cf,
+            max_cf,
+            sensitivity_bps,
+            max_step_bps,
+        };
+        dyn_map.set(asset, dcf);
+        AssetRegistryStorage::put_dyn_params(&env, &dyn_map);
+        Ok(())
+    }
+
+    /// Push a new price and update collateral factor dynamically
+    /// Admin/Oracle function to update price and trigger dynamic CF adjustment
+    ///
+    /// # Arguments
+    /// * `caller` - Admin address (must match contract admin)
+    /// * `asset` - Asset address
+    /// * `price` - New price in 1e8 scale
+    ///
+    /// # Returns
+    /// * New collateral factor after dynamic adjustment
+    pub fn push_price_and_update_cf(
+        env: Env,
+        caller: String,
+        asset: Address,
+        price: i128,
+    ) -> Result<i128, ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        // Set the price first (admin rights required) - inline the price setting to avoid reentrancy guard conflict
+        let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+
+        if price <= 0 {
+            return Err(ProtocolError::InvalidInput);
+        }
+
+        let mut map = AssetRegistryStorage::get_prices_map(&env);
+        map.set(asset.clone(), price);
+        AssetRegistryStorage::put_prices_map(&env, &map);
+
+        // Update market state with volatility calculation
+        let mut ms_map = AssetRegistryStorage::get_market_state(&env);
+        let mut ms = ms_map
+            .get(asset.clone())
+            .unwrap_or_else(MarketState::initial);
+
+        if ms.last_price > 0 {
+            // Calculate absolute return in basis points: |p/p0 - 1| * 10000
+            let num = (price - ms.last_price).abs() * 10000;
+            let den = if ms.last_price == 0 { 1 } else { ms.last_price };
+            let ret_bps = num / den;
+
+            // EWMA-like update: vol = (vol*4 + ret)/5
+            ms.vol_index_bps = (ms.vol_index_bps * 4 + ret_bps) / 5;
+        }
+        ms.last_price = price;
+        ms_map.set(asset.clone(), ms.clone());
+        AssetRegistryStorage::put_market_state(&env, &ms_map);
+
+        // Apply dynamic CF change
+        let mut params_map = AssetRegistryStorage::get_params_map(&env);
+        let mut asset_params = params_map.get(asset.clone()).unwrap_or_default();
+        let dyn_map = AssetRegistryStorage::get_dyn_params(&env);
+        let dcf = dyn_map.get(asset.clone()).unwrap_or_default();
+
+        // Calculate CF adjustment based on volatility
+        // delta_cf_bps = sensitivity_bps * (vol_index_bps / 100)
+        let delta_cf_bps = dcf.sensitivity_bps * (ms.vol_index_bps / 100);
+        let base_cf_bps = asset_params.collateral_factor / 10000; // convert 1e8 -> bps (1e8 / 10000 = 10000 bps)
+        let mut target_cf_bps = base_cf_bps - delta_cf_bps;
+
+        // Apply bounds
+        let min_cf_bps = dcf.min_cf / 10000;
+        let max_cf_bps = dcf.max_cf / 10000;
+        if target_cf_bps < min_cf_bps {
+            target_cf_bps = min_cf_bps;
+        }
+        if target_cf_bps > max_cf_bps {
+            target_cf_bps = max_cf_bps;
+        }
+
+        // Apply max step limit
+        let current_bps = asset_params.collateral_factor / 10000;
+        let diff = target_cf_bps - current_bps;
+        let step = if diff.abs() > dcf.max_step_bps {
+            dcf.max_step_bps * diff.signum()
+        } else {
+            diff
+        };
+
+        let new_cf_bps = current_bps + step;
+        let new_cf_1e8 = new_cf_bps * 10000; // convert back to 1e8 scale
+
+        // Update asset params
+        asset_params.collateral_factor = new_cf_1e8;
+        params_map.set(asset.clone(), asset_params);
+        AssetRegistryStorage::put_params_map(&env, &params_map);
+
+        // Emit event with before/after values
+        ProtocolEvent::DynamicCFUpdated(asset, new_cf_1e8).emit(&env);
+
+        Ok(new_cf_1e8)
+    }
+
+    /// Get current asset parameters
+    ///
+    /// # Arguments
+    /// * `asset` - Asset address
+    ///
+    /// # Returns
+    /// * Asset parameters or default if not found
+    pub fn get_asset_params(env: Env, asset: Address) -> AssetParams {
+        let map = AssetRegistryStorage::get_params_map(&env);
+        map.get(asset).unwrap_or_default()
+    }
+
+    /// Get current asset price
+    ///
+    /// # Arguments
+    /// * `asset` - Asset address
+    ///
+    /// # Returns
+    /// * Asset price or 0 if not found
+    pub fn get_asset_price(env: Env, asset: Address) -> i128 {
+        let map = AssetRegistryStorage::get_prices_map(&env);
+        map.get(asset).unwrap_or(0)
+    }
+
+    /// Get dynamic CF parameters for an asset
+    ///
+    /// # Arguments
+    /// * `asset` - Asset address
+    ///
+    /// # Returns
+    /// * Dynamic CF parameters or default if not found
+    pub fn get_dynamic_cf_params(env: Env, asset: Address) -> DynamicCFParams {
+        let map = AssetRegistryStorage::get_dyn_params(&env);
+        map.get(asset).unwrap_or_default()
+    }
+
+    /// Get market state for an asset
+    ///
+    /// # Arguments
+    /// * `asset` - Asset address
+    ///
+    /// # Returns
+    /// * Market state or initial state if not found
+    pub fn get_market_state(env: Env, asset: Address) -> MarketState {
+        let map = AssetRegistryStorage::get_market_state(&env);
+        map.get(asset).unwrap_or_else(MarketState::initial)
     }
 }
