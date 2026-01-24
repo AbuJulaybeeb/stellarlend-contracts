@@ -315,7 +315,7 @@ pub fn deposit_collateral(
 }
 
 /// Update user analytics after deposit
-fn update_user_analytics(
+pub fn update_user_analytics(
     env: &Env,
     user: &Address,
     amount: i128,
@@ -363,7 +363,7 @@ fn update_user_analytics(
 }
 
 /// Update protocol analytics after deposit
-fn update_protocol_analytics(
+pub fn update_protocol_analytics(
     env: &Env,
     amount: i128,
     is_deposit: bool,
@@ -395,7 +395,7 @@ fn update_protocol_analytics(
 }
 
 /// Add entry to activity log
-fn add_activity_log(
+pub fn add_activity_log(
     env: &Env,
     user: &Address,
     activity_type: Symbol,
@@ -455,7 +455,7 @@ fn emit_deposit_event(
 }
 
 /// Emit position updated event
-fn emit_position_updated_event(env: &Env, user: &Address, position: &Position) {
+pub fn emit_position_updated_event(env: &Env, user: &Address, position: &Position) {
     let topics = (Symbol::new(env, "position_updated"), user.clone());
     let mut data: Vec<Val> = Vec::new(env);
     data.push_back(Symbol::new(env, "user").into_val(env));
@@ -469,7 +469,7 @@ fn emit_position_updated_event(env: &Env, user: &Address, position: &Position) {
 }
 
 /// Emit analytics updated event
-fn emit_analytics_updated_event(
+pub fn emit_analytics_updated_event(
     env: &Env,
     user: &Address,
     activity_type: &str,
@@ -492,7 +492,7 @@ fn emit_analytics_updated_event(
 }
 
 /// Emit user activity tracked event
-fn emit_user_activity_tracked_event(
+pub fn emit_user_activity_tracked_event(
     env: &Env,
     user: &Address,
     operation: Symbol,
