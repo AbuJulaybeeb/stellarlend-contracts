@@ -1,8 +1,11 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation}, Address, Env, IntoVal, Symbol, Val};
 use soroban_sdk::xdr::{ScErrorCode, ScErrorType};
+use soroban_sdk::{
+    testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation},
+    Address, Env, IntoVal, Symbol, Val,
+};
 
 // Import the GovernanceContractClient for direct interaction
 use governance::GovernanceContractClient;
@@ -109,7 +112,10 @@ fn test_governance_propose() {
         assert_eq!(proposal.proposer, admin);
         assert_eq!(proposal.description, description);
         assert_eq!(proposal.action, action);
-        assert_eq!(proposal.voting_ends_at, env.ledger().timestamp() + voting_period);
+        assert_eq!(
+            proposal.voting_ends_at,
+            env.ledger().timestamp() + voting_period
+        );
         assert_eq!(
             proposal.grace_period_ends_at,
             env.ledger().timestamp() + voting_period + grace_period
@@ -247,7 +253,7 @@ fn test_governance_execute_success() {
     let description = soroban_sdk::String::from_str(&env, "Enable Emergency Pause");
     let action = Action::SetEmergencyPause(true);
     let voting_period = 100; // Small voting period
-    let grace_period = 50;   // Small grace period
+    let grace_period = 50; // Small grace period
 
     let proposal_id = env.as_contract(&admin, || {
         governance_client
@@ -398,9 +404,7 @@ fn test_governance_add_signer() {
     let new_signer = Address::generate(&env);
 
     env.as_contract(&admin, || {
-        governance_client
-            .add_signer(&admin, &new_signer)
-            .unwrap();
+        governance_client.add_signer(&admin, &new_signer).unwrap();
     });
 
     let updated_signers = governance_client.get_signers();
@@ -445,9 +449,7 @@ fn test_governance_add_signer_already_exists() {
 
     // Try to add existing signer
     env.as_contract(&admin, || {
-        governance_client
-            .add_signer(&admin, &signer1)
-            .unwrap();
+        governance_client.add_signer(&admin, &signer1).unwrap();
     });
 }
 
@@ -464,9 +466,7 @@ fn test_governance_remove_signer() {
         setup_contracts(&env, &admin, &signers, threshold);
 
     env.as_contract(&admin, || {
-        governance_client
-            .remove_signer(&admin, &signer2)
-            .unwrap();
+        governance_client.remove_signer(&admin, &signer2).unwrap();
     });
 
     let updated_signers = governance_client.get_signers();
@@ -547,7 +547,8 @@ fn test_governance_set_threshold() {
     let signer1 = Address::generate(&env);
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
-    let signers = soroban_sdk::Vec::from_array(&env, [signer1.clone(), signer2.clone(), signer3.clone()]);
+    let signers =
+        soroban_sdk::Vec::from_array(&env, [signer1.clone(), signer2.clone(), signer3.clone()]);
     let threshold = 2;
 
     let (_hello_id, _hello_client, _governance_id, governance_client) =
@@ -649,4 +650,3 @@ fn test_governance_transfer_admin_unauthorized() {
             .unwrap();
     });
 }
-

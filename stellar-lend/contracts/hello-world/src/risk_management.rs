@@ -28,10 +28,9 @@ pub enum RiskManagementError {
     InvalidLiquidationIncentive = 10,
     /// Overflow occurred during calculation
     Overflow = 11,
-            /// Action requires governance approval
-            GovernanceRequired = 12,
-        
-        }
+    /// Action requires governance approval
+    GovernanceRequired = 12,
+}
 /// Storage keys for risk management data
 #[contracttype]
 #[derive(Clone)]

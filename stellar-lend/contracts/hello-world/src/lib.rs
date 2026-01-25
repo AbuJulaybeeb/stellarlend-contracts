@@ -1,12 +1,15 @@
 #![no_std]
 #![allow(unused_imports)]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Map, String, Symbol, IntoVal};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, Address, Env, IntoVal, Map, String, Symbol,
+};
 
 mod deposit;
-mod risk_management;
 mod governance;
+mod risk_management;
 
 use deposit::deposit_collateral;
+use governance::{Action, GovernanceContractClient, Proposal};
 use risk_management::{
     can_be_liquidated, get_close_factor, get_liquidation_incentive,
     get_liquidation_incentive_amount, get_liquidation_threshold, get_max_liquidatable_amount,
@@ -14,7 +17,6 @@ use risk_management::{
     require_min_collateral_ratio, set_emergency_pause, set_pause_switch, set_pause_switches,
     set_risk_params, RiskConfig, RiskManagementError,
 };
-use governance::{Action, Proposal, GovernanceContractClient};
 
 mod withdraw;
 use withdraw::withdraw_collateral;
@@ -139,7 +141,7 @@ impl HelloContract {
                     &voting_period,
                     &grace_period,
                 )
-                .map_err(|_| RiskManagementError::GovernanceRequired)?  // Note the ? here
+                .map_err(|_| RiskManagementError::GovernanceRequired)? // Note the ? here
                 .map_err(|_| RiskManagementError::GovernanceRequired)?; // Convert ClientError to RiskManagementError
             Ok(())
         } else {
@@ -215,7 +217,10 @@ impl HelloContract {
             let action = Action::Call(
                 env.current_contract_address(),
                 Symbol::new(&env, "set_pause_switches_internal"),
-                soroban_sdk::Vec::from_array(&env, [caller.into_val(&env), switches.into_val(&env)]),
+                soroban_sdk::Vec::from_array(
+                    &env,
+                    [caller.into_val(&env), switches.into_val(&env)],
+                ),
             );
             let voting_period = 60 * 60 * 24 * 3; // 3 days
             let grace_period = 60 * 60 * 24; // 1 day
@@ -510,7 +515,8 @@ impl HelloContract {
         action: Action,
         voting_period_seconds: u64,
         grace_period_seconds: u64,
-    ) -> Result<u32, RiskManagementError> { // Return RiskManagementError for consistency
+    ) -> Result<u32, RiskManagementError> {
+        // Return RiskManagementError for consistency
         Self::get_governance_client(&env)
             .try_propose(
                 &proposer,
@@ -525,21 +531,24 @@ impl HelloContract {
 
     /// Proxies to GovernanceContract::vote
     pub fn gov_vote(env: Env, voter: Address, proposal_id: u32) -> Result<(), RiskManagementError> {
-        Self::get_governance_client(&env).try_vote(&voter, &proposal_id)
+        Self::get_governance_client(&env)
+            .try_vote(&voter, &proposal_id)
             .map_err(|_| RiskManagementError::GovernanceRequired)?
             .map_err(|_| RiskManagementError::GovernanceRequired)
     }
 
     /// Proxies to GovernanceContract::execute
     pub fn gov_execute(env: Env, proposal_id: u32) -> Result<(), RiskManagementError> {
-        Self::get_governance_client(&env).try_execute(&proposal_id)
+        Self::get_governance_client(&env)
+            .try_execute(&proposal_id)
             .map_err(|_| RiskManagementError::GovernanceRequired)?
             .map_err(|_| RiskManagementError::GovernanceRequired)
     }
 
     /// Proxies to GovernanceContract::get_proposal
     pub fn gov_get_proposal(env: Env, proposal_id: u32) -> Result<Proposal, RiskManagementError> {
-        Self::get_governance_client(&env).try_get_proposal(&proposal_id)
+        Self::get_governance_client(&env)
+            .try_get_proposal(&proposal_id)
             .map_err(|_| RiskManagementError::GovernanceRequired)?
             .map_err(|_| RiskManagementError::GovernanceRequired)
     }
@@ -550,7 +559,8 @@ impl HelloContract {
         caller: Address,
         new_signer: Address,
     ) -> Result<(), RiskManagementError> {
-        Self::get_governance_client(&env).try_add_signer(&caller, &new_signer)
+        Self::get_governance_client(&env)
+            .try_add_signer(&caller, &new_signer)
             .map_err(|_| RiskManagementError::GovernanceRequired)?
             .map_err(|_| RiskManagementError::GovernanceRequired)
     }
@@ -561,7 +571,8 @@ impl HelloContract {
         caller: Address,
         signer_to_remove: Address,
     ) -> Result<(), RiskManagementError> {
-        Self::get_governance_client(&env).try_remove_signer(&caller, &signer_to_remove)
+        Self::get_governance_client(&env)
+            .try_remove_signer(&caller, &signer_to_remove)
             .map_err(|_| RiskManagementError::GovernanceRequired)?
             .map_err(|_| RiskManagementError::GovernanceRequired)
     }
@@ -572,28 +583,32 @@ impl HelloContract {
         caller: Address,
         new_threshold: u32,
     ) -> Result<(), RiskManagementError> {
-        Self::get_governance_client(&env).try_set_threshold(&caller, &new_threshold)
+        Self::get_governance_client(&env)
+            .try_set_threshold(&caller, &new_threshold)
             .map_err(|_| RiskManagementError::GovernanceRequired)?
             .map_err(|_| RiskManagementError::GovernanceRequired)
     }
 
     /// Proxies to GovernanceContract::get_signers
     pub fn gov_get_signers(env: Env) -> Result<soroban_sdk::Vec<Address>, RiskManagementError> {
-        Self::get_governance_client(&env).try_get_signers()
+        Self::get_governance_client(&env)
+            .try_get_signers()
             .map_err(|_| RiskManagementError::GovernanceRequired)?
             .map_err(|_| RiskManagementError::GovernanceRequired)
     }
 
     /// Proxies to GovernanceContract::get_threshold
     pub fn gov_get_threshold(env: Env) -> Result<u32, RiskManagementError> {
-        Self::get_governance_client(&env).try_get_threshold()
+        Self::get_governance_client(&env)
+            .try_get_threshold()
             .map_err(|_| RiskManagementError::GovernanceRequired)?
             .map_err(|_| RiskManagementError::GovernanceRequired)
     }
 
     /// Proxies to GovernanceContract::get_admin
     pub fn gov_get_admin(env: Env) -> Result<Address, RiskManagementError> {
-        Self::get_governance_client(&env).try_get_admin()
+        Self::get_governance_client(&env)
+            .try_get_admin()
             .map_err(|_| RiskManagementError::GovernanceRequired)?
             .map_err(|_| RiskManagementError::GovernanceRequired)
     }
@@ -604,9 +619,11 @@ impl HelloContract {
         caller: Address,
         new_admin: Address,
     ) -> Result<(), RiskManagementError> {
-        Self::get_governance_client(&env).try_transfer_admin(&caller, &new_admin)
+        Self::get_governance_client(&env)
+            .try_transfer_admin(&caller, &new_admin)
             .map_err(|_| RiskManagementError::GovernanceRequired)?
             .map_err(|_| RiskManagementError::GovernanceRequired)
+    }
     /// Update price feed from oracle
     ///
     /// Updates the price for an asset from an oracle source with validation.
@@ -739,6 +756,6 @@ impl HelloContract {
 }
 
 #[cfg(test)]
-mod test;
-#[cfg(test)]
 mod governance_test;
+#[cfg(test)]
+mod test;

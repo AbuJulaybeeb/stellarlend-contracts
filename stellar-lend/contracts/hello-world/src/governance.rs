@@ -1,9 +1,13 @@
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Val, Error as SdkError};
 use soroban_sdk::xdr::{ScErrorCode, ScErrorType};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, Address, Env, Error as SdkError, Symbol, Val,
+};
 
 impl From<&GovernanceError> for SdkError {
     fn from(error: &GovernanceError) -> Self {
-        SdkError::from_type_and_code(ScErrorType::Contract, unsafe { ScErrorCode::try_from(*error as i32).unwrap_unchecked() })
+        SdkError::from_type_and_code(ScErrorType::Contract, unsafe {
+            ScErrorCode::try_from(*error as i32).unwrap_unchecked()
+        })
     }
 }
 
@@ -98,8 +102,8 @@ pub enum Action {
     ),
     // Generic action for calling other contracts or functions
     Call(
-        Address,              // contract_id
-        Symbol,               // function
+        Address,               // contract_id
+        Symbol,                // function
         soroban_sdk::Vec<Val>, // args
     ),
     // Upgrade contract
@@ -213,11 +217,17 @@ impl GovernanceContract {
             .get(&GovernanceDataKey::ProposalCount)
             .ok_or(GovernanceError::NotInitialized)?;
 
-        proposal_count = proposal_count.checked_add(1).ok_or(GovernanceError::InvalidArguments)?; // Simple increment, consider overflow for very long-lived contracts
+        proposal_count = proposal_count
+            .checked_add(1)
+            .ok_or(GovernanceError::InvalidArguments)?; // Simple increment, consider overflow for very long-lived contracts
 
         let current_time = env.ledger().timestamp();
-        let voting_ends_at = current_time.checked_add(voting_period_seconds).ok_or(GovernanceError::InvalidArguments)?;
-        let grace_period_ends_at = voting_ends_at.checked_add(grace_period_seconds).ok_or(GovernanceError::InvalidArguments)?;
+        let voting_ends_at = current_time
+            .checked_add(voting_period_seconds)
+            .ok_or(GovernanceError::InvalidArguments)?;
+        let grace_period_ends_at = voting_ends_at
+            .checked_add(grace_period_seconds)
+            .ok_or(GovernanceError::InvalidArguments)?;
 
         let proposal = Proposal {
             proposer: proposer.clone(), // Clone here to fix the moved value error
@@ -281,7 +291,9 @@ impl GovernanceContract {
             return Err(GovernanceError::ProposalExpired);
         }
 
-        if !(proposal.status == ProposalStatus::Pending || proposal.status == ProposalStatus::Active) {
+        if !(proposal.status == ProposalStatus::Pending
+            || proposal.status == ProposalStatus::Active)
+        {
             return Err(GovernanceError::InvalidArguments); // Can only vote on pending/active proposals
         }
 
@@ -375,10 +387,8 @@ impl GovernanceContract {
             env.storage()
                 .persistent()
                 .set(&GovernanceDataKey::Proposal(proposal_id), &proposal);
-            env.events().publish(
-                (Symbol::new(&env, "PROPOSAL_DEFEATED"), proposal_id),
-                (),
-            );
+            env.events()
+                .publish((Symbol::new(&env, "PROPOSAL_DEFEATED"), proposal_id), ());
             return Err(GovernanceError::InsufficientVotes);
         }
 
@@ -415,7 +425,8 @@ impl GovernanceContract {
                 );
             }
             Action::Upgrade(new_wasm_hash) => {
-                env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+                env.deployer()
+                    .update_current_contract_wasm(new_wasm_hash.clone());
                 env.events().publish(
                     (Symbol::new(&env, "ACTION_EXECUTED"), proposal_id),
                     (Symbol::new(&env, "Upgrade"), new_wasm_hash),
@@ -446,7 +457,11 @@ impl GovernanceContract {
     /// Adds a new signer to the multisig.
     ///
     /// Only the current admin can add signers.
-    pub fn add_signer(env: Env, caller: Address, new_signer: Address) -> Result<(), GovernanceError> {
+    pub fn add_signer(
+        env: Env,
+        caller: Address,
+        new_signer: Address,
+    ) -> Result<(), GovernanceError> {
         caller.require_auth();
 
         let admin: Address = env
@@ -531,7 +546,10 @@ impl GovernanceContract {
             .set(&GovernanceDataKey::Signers, &new_signers);
 
         env.events().publish(
-            (Symbol::new(&env, "SIGNER_REMOVED"), signer_to_remove.clone()),
+            (
+                Symbol::new(&env, "SIGNER_REMOVED"),
+                signer_to_remove.clone(),
+            ),
             (caller,),
         );
 
@@ -611,7 +629,11 @@ impl GovernanceContract {
     /// * `env` - The contract environment.
     /// * `caller` - The address initiating the transfer. Must be the current admin.
     /// * `new_admin` - The address of the new admin.
-    pub fn transfer_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), GovernanceError> {
+    pub fn transfer_admin(
+        env: Env,
+        caller: Address,
+        new_admin: Address,
+    ) -> Result<(), GovernanceError> {
         caller.require_auth();
 
         let admin: Address = env
