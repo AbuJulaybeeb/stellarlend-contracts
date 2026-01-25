@@ -30,6 +30,14 @@ use cross_asset::{
     update_asset_price, AssetConfig, AssetKey, AssetPosition, CrossAssetError, UserPositionSummary,
 };
 
+mod oracle;
+use oracle::{configure_oracle, get_price, set_fallback_oracle, update_price_feed, OracleConfig};
+
+mod flash_loan;
+use flash_loan::{
+    configure_flash_loan, execute_flash_loan, repay_flash_loan, set_flash_loan_fee, FlashLoanConfig,
+};
+
 #[contract]
 pub struct HelloContract;
 
@@ -491,6 +499,135 @@ impl HelloContract {
     }
 
     // ============================================================================
+    /// Update price feed from oracle
+    ///
+    /// Updates the price for an asset from an oracle source with validation.
+    ///
+    /// # Arguments
+    /// * `caller` - The address calling this function (must be admin or oracle)
+    /// * `asset` - The asset address
+    /// * `price` - The new price
+    /// * `decimals` - Price decimals
+    /// * `oracle` - The oracle address providing this price
+    ///
+    /// # Returns
+    /// Returns the updated price
+    ///
+    /// # Events
+    /// Emits `price_updated` event
+    pub fn update_price_feed(
+        env: Env,
+        caller: Address,
+        asset: Address,
+        price: i128,
+        decimals: u32,
+        oracle: Address,
+    ) -> i128 {
+        update_price_feed(&env, caller, asset, price, decimals, oracle)
+            .unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
+    }
+
+    /// Get price for an asset
+    ///
+    /// Retrieves the current price for an asset, using cache or fallback if needed.
+    ///
+    /// # Arguments
+    /// * `asset` - The asset address
+    ///
+    /// # Returns
+    /// Returns the current price
+    pub fn get_price(env: Env, asset: Address) -> i128 {
+        get_price(&env, &asset).unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
+    }
+
+    /// Set fallback oracle for an asset (admin only)
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be admin)
+    /// * `asset` - The asset address
+    /// * `fallback_oracle` - The fallback oracle address
+    pub fn set_fallback_oracle(
+        env: Env,
+        caller: Address,
+        asset: Address,
+        fallback_oracle: Address,
+    ) {
+        set_fallback_oracle(&env, caller, asset, fallback_oracle)
+            .unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
+    }
+
+    /// Configure oracle parameters (admin only)
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be admin)
+    /// * `config` - The new oracle configuration
+    pub fn configure_oracle(env: Env, caller: Address, config: OracleConfig) {
+        configure_oracle(&env, caller, config).unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
+    }
+
+    /// Execute flash loan
+    ///
+    /// Allows users to borrow assets without collateral for a single transaction.
+    /// The loan must be repaid (with fee) within the same transaction.
+    ///
+    /// # Arguments
+    /// * `user` - The address borrowing the flash loan
+    /// * `asset` - The address of the asset contract to borrow
+    /// * `amount` - The amount to borrow
+    /// * `callback` - The callback contract address that will handle repayment
+    ///
+    /// # Returns
+    /// Returns the total amount to repay (principal + fee)
+    ///
+    /// # Events
+    /// Emits `flash_loan_initiated` event
+    pub fn execute_flash_loan(
+        env: Env,
+        user: Address,
+        asset: Address,
+        amount: i128,
+        callback: Address,
+    ) -> i128 {
+        execute_flash_loan(&env, user, asset, amount, callback)
+            .unwrap_or_else(|e| panic!("Flash loan error: {:?}", e))
+    }
+
+    /// Repay flash loan
+    ///
+    /// Must be called within the same transaction as the flash loan.
+    /// Validates that the full amount (principal + fee) is repaid.
+    ///
+    /// # Arguments
+    /// * `user` - The address repaying the flash loan
+    /// * `asset` - The address of the asset contract
+    /// * `amount` - The amount being repaid (should equal principal + fee)
+    ///
+    /// # Events
+    /// Emits `flash_loan_repaid` event
+    pub fn repay_flash_loan(env: Env, user: Address, asset: Address, amount: i128) {
+        repay_flash_loan(&env, user, asset, amount)
+            .unwrap_or_else(|e| panic!("Flash loan error: {:?}", e))
+    }
+
+    /// Set flash loan fee (admin only)
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be admin)
+    /// * `fee_bps` - The new fee in basis points
+    pub fn set_flash_loan_fee(env: Env, caller: Address, fee_bps: i128) {
+        set_flash_loan_fee(&env, caller, fee_bps)
+            .unwrap_or_else(|e| panic!("Flash loan error: {:?}", e))
+    }
+
+    /// Configure flash loan parameters (admin only)
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be admin)
+    /// * `config` - The new flash loan configuration
+    pub fn configure_flash_loan(env: Env, caller: Address, config: FlashLoanConfig) {
+        configure_flash_loan(&env, caller, config)
+            .unwrap_or_else(|e| panic!("Flash loan error: {:?}", e))
+    }
 }
 
 #[cfg(test)]
