@@ -369,6 +369,7 @@ pub fn add_liquidity(env: &Env, user: Address, params: LiquidityParams) -> Resul
 ///
 /// # Returns
 /// Returns tuple (amount_a, amount_b) received
+#[allow(clippy::too_many_arguments)]
 pub fn remove_liquidity(
     env: &Env,
     user: Address,
@@ -780,6 +781,7 @@ fn execute_amm_add_liquidity(
 }
 
 /// Execute remove liquidity through AMM protocol
+#[allow(clippy::too_many_arguments)]
 fn execute_amm_remove_liquidity(
     env: &Env,
     protocol: &Address,

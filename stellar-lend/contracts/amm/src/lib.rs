@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::too_many_arguments)]
 use soroban_sdk::{contract, contractimpl, Address, Env, Map};
 
 mod amm;
@@ -141,6 +142,7 @@ impl AmmContract {
     /// Emits the following events:
     /// - `liquidity_removed`: Liquidity removal details
     /// - `amm_operation`: AMM operation tracking
+    #[allow(clippy::too_many_arguments)]
     pub fn remove_liquidity(
         env: Env,
         user: Address,
