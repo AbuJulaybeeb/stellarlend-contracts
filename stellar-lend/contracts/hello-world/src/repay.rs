@@ -30,12 +30,14 @@ pub enum RepayError {
 
 /// Annual interest rate in basis points (e.g., 500 = 5% per year)
 /// This is a simple constant rate model - in production, this would be more sophisticated
-const ANNUAL_INTEREST_RATE_BPS: i128 = 500; // 5% per year
-
+// Interest rate is now calculated dynamically based on utilization
+// See interest_rate module for details
 /// Calculate interest accrued since last accrual time
 /// Uses simple interest: interest = principal * rate * time
-/// Rate is annual, so we need to convert time to years
+/// Calculate accrued interest using dynamic interest rate
+/// Uses the current borrow rate based on protocol utilization
 fn calculate_accrued_interest(
+    env: &Env,
     principal: i128,
     last_accrual_time: u64,
     current_time: u64,
@@ -48,31 +50,18 @@ fn calculate_accrued_interest(
         return Ok(0);
     }
 
-    // Calculate time elapsed in seconds
-    let time_elapsed = current_time
-        .checked_sub(last_accrual_time)
-        .ok_or(RepayError::Overflow)?;
+    // Get current borrow rate (in basis points)
+    let rate_bps =
+        crate::interest_rate::calculate_borrow_rate(env).map_err(|_| RepayError::Overflow)?;
 
-    // Convert to years (assuming 365 days per year, 86400 seconds per day)
-    // Use fixed-point arithmetic: multiply by 10000 to preserve precision
-    let seconds_per_year: u64 = 365 * 86400; // 31,536,000 seconds
-
-    // Calculate interest: principal * (rate / 10000) * (time_elapsed / seconds_per_year)
-    // To avoid precision loss, we do: principal * rate * time_elapsed / (10000 * seconds_per_year)
-    let rate_multiplier = ANNUAL_INTEREST_RATE_BPS as u64;
-    let denominator = 10000_u64
-        .checked_mul(seconds_per_year)
-        .ok_or(RepayError::Overflow)?;
-
-    // Calculate: principal * rate * time_elapsed / denominator
-    let principal_u64 = principal as u64;
-    let numerator = principal_u64
-        .checked_mul(rate_multiplier)
-        .and_then(|n| n.checked_mul(time_elapsed))
-        .ok_or(RepayError::Overflow)?;
-
-    let interest_u64 = numerator.checked_div(denominator).unwrap_or(0);
-    Ok(interest_u64 as i128)
+    // Calculate interest using the dynamic rate
+    crate::interest_rate::calculate_accrued_interest(
+        principal,
+        last_accrual_time,
+        current_time,
+        rate_bps,
+    )
+    .map_err(|_| RepayError::Overflow)
 }
 
 /// Accrue interest on a position
@@ -86,9 +75,9 @@ fn accrue_interest(env: &Env, position: &mut Position) -> Result<(), RepayError>
         return Ok(());
     }
 
-    // Calculate new interest accrued
+    // Calculate new interest accrued using dynamic rate
     let new_interest =
-        calculate_accrued_interest(position.debt, position.last_accrual_time, current_time)?;
+        calculate_accrued_interest(env, position.debt, position.last_accrual_time, current_time)?;
 
     // Add to existing interest
     position.borrow_interest = position

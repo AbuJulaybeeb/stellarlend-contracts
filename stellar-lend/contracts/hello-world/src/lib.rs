@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::too_many_arguments)] // Allow for generated client functions with many parameters
 use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol};
 
 mod deposit;
@@ -33,10 +34,18 @@ use flash_loan::{
 mod liquidate;
 use liquidate::liquidate;
 
+mod interest_rate;
+use interest_rate::{
+    get_current_borrow_rate, get_current_supply_rate, get_current_utilization,
+    initialize_interest_rate_config, set_emergency_rate_adjustment, update_interest_rate_config,
+    InterestRateError,
+};
+
 #[contract]
 pub struct HelloContract;
 
 #[contractimpl]
+#[allow(clippy::too_many_arguments)] // Allow for generated client functions with many parameters
 impl HelloContract {
     pub fn hello(env: Env) -> String {
         String::from_str(&env, "Hello")
@@ -44,7 +53,7 @@ impl HelloContract {
 
     /// Initialize the contract with admin address
     ///
-    /// Sets up the risk management system with default parameters.
+    /// Sets up the risk management system and interest rate model with default parameters.
     /// Must be called before any other operations.
     ///
     /// # Arguments
@@ -53,7 +62,10 @@ impl HelloContract {
     /// # Returns
     /// Returns Ok(()) on success
     pub fn initialize(env: Env, admin: Address) -> Result<(), RiskManagementError> {
-        initialize_risk_management(&env, admin)
+        initialize_risk_management(&env, admin.clone())?;
+        initialize_interest_rate_config(&env, admin)
+            .map_err(|_| RiskManagementError::InvalidParameter)?;
+        Ok(())
     }
 
     /// Deposit collateral into the protocol
@@ -541,6 +553,95 @@ impl HelloContract {
             debt_amount,
         )
         .unwrap_or_else(|e| panic!("Liquidation error: {:?}", e))
+    }
+
+    /// Get current utilization rate
+    ///
+    /// Returns the current protocol utilization (borrows / deposits) in basis points.
+    ///
+    /// # Returns
+    /// Utilization rate in basis points (0-10000)
+    pub fn get_utilization(env: Env) -> i128 {
+        get_current_utilization(&env).unwrap_or_else(|e| panic!("Interest rate error: {:?}", e))
+    }
+
+    /// Get current borrow interest rate
+    ///
+    /// Returns the current borrow interest rate based on utilization.
+    ///
+    /// # Returns
+    /// Borrow rate in basis points (annual)
+    pub fn get_borrow_rate(env: Env) -> i128 {
+        get_current_borrow_rate(&env).unwrap_or_else(|e| panic!("Interest rate error: {:?}", e))
+    }
+
+    /// Get current supply interest rate
+    ///
+    /// Returns the current supply interest rate (borrow rate - spread).
+    ///
+    /// # Returns
+    /// Supply rate in basis points (annual)
+    pub fn get_supply_rate(env: Env) -> i128 {
+        get_current_supply_rate(&env).unwrap_or_else(|e| panic!("Interest rate error: {:?}", e))
+    }
+
+    /// Update interest rate configuration (admin only)
+    ///
+    /// Updates interest rate model parameters with validation.
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be admin)
+    /// * `base_rate_bps` - Optional new base rate (in basis points)
+    /// * `kink_utilization_bps` - Optional new kink utilization (in basis points)
+    /// * `multiplier_bps` - Optional new multiplier (in basis points)
+    /// * `jump_multiplier_bps` - Optional new jump multiplier (in basis points)
+    /// * `rate_floor_bps` - Optional new rate floor (in basis points)
+    /// * `rate_ceiling_bps` - Optional new rate ceiling (in basis points)
+    /// * `spread_bps` - Optional new spread (in basis points)
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_interest_rate_config(
+        env: Env,
+        caller: Address,
+        base_rate_bps: Option<i128>,
+        kink_utilization_bps: Option<i128>,
+        multiplier_bps: Option<i128>,
+        jump_multiplier_bps: Option<i128>,
+        rate_floor_bps: Option<i128>,
+        rate_ceiling_bps: Option<i128>,
+        spread_bps: Option<i128>,
+    ) -> Result<(), InterestRateError> {
+        update_interest_rate_config(
+            &env,
+            caller,
+            base_rate_bps,
+            kink_utilization_bps,
+            multiplier_bps,
+            jump_multiplier_bps,
+            rate_floor_bps,
+            rate_ceiling_bps,
+            spread_bps,
+        )
+    }
+
+    /// Set emergency rate adjustment (admin only)
+    ///
+    /// Allows admin to make emergency adjustments to interest rates.
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be admin)
+    /// * `adjustment_bps` - Emergency adjustment in basis points (can be negative)
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn set_emergency_rate_adjustment(
+        env: Env,
+        caller: Address,
+        adjustment_bps: i128,
+    ) -> Result<(), InterestRateError> {
+        set_emergency_rate_adjustment(&env, caller, adjustment_bps)
     }
 }
 
