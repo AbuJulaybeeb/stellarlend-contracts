@@ -33,6 +33,7 @@ use cross_asset::{
 #[contract]
 pub struct HelloContract;
 
+#[allow(clippy::too_many_arguments)]
 #[contractimpl]
 impl HelloContract {
     pub fn hello(env: Env) -> String {
@@ -388,6 +389,7 @@ impl HelloContract {
     }
 
     /// Update asset parameters (admin only)
+    #[allow(clippy::too_many_arguments)]
     pub fn update_asset_config(
         env: Env,
         asset: Option<Address>,

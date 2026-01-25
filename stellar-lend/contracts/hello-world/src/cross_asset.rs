@@ -165,6 +165,7 @@ pub fn initialize_asset(
 /// * `max_borrow` - Optional new borrow cap
 /// * `can_collateralize` - Optional collateral enablement
 /// * `can_borrow` - Optional borrow enablement
+#[allow(clippy::too_many_arguments)]
 pub fn update_asset_config(
     env: &Env,
     asset: Option<Address>,
@@ -623,7 +624,7 @@ fn require_valid_config(config: &AssetConfig) -> Result<(), CrossAssetError> {
 }
 
 fn require_valid_basis_points(value: i128) -> Result<(), CrossAssetError> {
-    if value < 0 || value > 10_000 {
+    if !(0..=10_000).contains(&value) {
         return Err(CrossAssetError::AssetNotConfigured);
     }
     Ok(())

@@ -17,8 +17,8 @@ fn create_asset_config(env: &Env, asset: Option<Address>, price: i128) -> AssetC
         collateral_factor: 7500, // 75%
         borrow_factor: 8000,     // 80%
         reserve_factor: 1000,    // 10%
-        max_supply: 1_000_000_0000000,
-        max_borrow: 800_000_0000000,
+        max_supply: 10_000_000_000_000,
+        max_borrow: 8_000_000_000_000,
         can_collateralize: true,
         can_borrow: true,
         price,
@@ -133,7 +133,7 @@ fn test_initialize_multiple_assets() {
     assert!(eth_result.is_ok());
 
     // Initialize native XLM
-    let xlm_config = create_asset_config(&env, None, 0_1000000);
+    let xlm_config = create_asset_config(&env, None, 1000000);
     let xlm_result = client.try_initialize_asset(&None, &xlm_config);
     assert!(xlm_result.is_ok());
 
@@ -211,12 +211,12 @@ fn test_update_asset_config_multiple_params() {
     // Update multiple parameters
     let update_result = client.try_update_asset_config(
         &Some(usdc.clone()),
-        &Some(8000_i128),              // collateral_factor
-        &Some(8500_i128),              // borrow_factor
-        &Some(2_000_000_0000000_i128), // max_supply
-        &Some(1_500_000_0000000_i128), // max_borrow
-        &Some(true),                   // can_collateralize
-        &Some(true),                   // can_borrow
+        &Some(8000_i128),               // collateral_factor
+        &Some(8500_i128),               // borrow_factor
+        &Some(20_000_000_000_000_i128), // max_supply
+        &Some(15_000_000_000_000_i128), // max_borrow
+        &Some(true),                    // can_collateralize
+        &Some(true),                    // can_borrow
     );
     assert!(update_result.is_ok());
 
@@ -227,8 +227,8 @@ fn test_update_asset_config_multiple_params() {
     let config = updated_config.unwrap().unwrap();
     assert_eq!(config.collateral_factor, 8000);
     assert_eq!(config.borrow_factor, 8500);
-    assert_eq!(config.max_supply, 2_000_000_0000000);
-    assert_eq!(config.max_borrow, 1_500_000_0000000);
+    assert_eq!(config.max_supply, 20_000_000_000_000);
+    assert_eq!(config.max_borrow, 15_000_000_000_000);
 }
 
 #[test]
@@ -388,7 +388,7 @@ fn test_deposit_native_xlm() {
     let init_result = client.try_initialize_ca(&admin);
     assert!(init_result.is_ok());
 
-    let xlm_config = create_asset_config(&env, None, 0_1000000);
+    let xlm_config = create_asset_config(&env, None, 1000000);
     let asset_result = client.try_initialize_asset(&None, &xlm_config);
     assert!(asset_result.is_ok());
 
@@ -529,7 +529,7 @@ fn test_deposit_three_different_assets() {
         .try_initialize_asset(&Some(eth.clone()), &eth_config)
         .is_ok());
 
-    let xlm_config = create_asset_config(&env, None, 0_1000000);
+    let xlm_config = create_asset_config(&env, None, 1000000);
     assert!(client.try_initialize_asset(&None, &xlm_config).is_ok());
 
     // Deposit all three
@@ -1292,7 +1292,7 @@ fn test_get_position_summary_no_activity() {
     assert_eq!(summary.total_collateral_value, 0);
     assert_eq!(summary.total_debt_value, 0);
     assert_eq!(summary.health_factor, i128::MAX);
-    assert_eq!(summary.is_liquidatable, false);
+    assert!(!summary.is_liquidatable);
 }
 
 #[test]
@@ -1329,7 +1329,7 @@ fn test_get_position_summary_single_asset() {
     assert_eq!(summary.total_collateral_value, 1000_0000000);
     assert_eq!(summary.total_debt_value, 500_0000000);
     assert!(summary.health_factor > 0);
-    assert_eq!(summary.is_liquidatable, false);
+    assert!(!summary.is_liquidatable);
 }
 
 #[test]
@@ -1395,7 +1395,7 @@ fn test_get_position_summary_multi_asset() {
     assert_eq!(summary.total_debt_value, 20000_0000000);
     // Health should be good (60k * 0.75 / 20k = 2.25)
     assert!(summary.health_factor > 10000);
-    assert_eq!(summary.is_liquidatable, false);
+    assert!(!summary.is_liquidatable);
 }
 
 #[test]
@@ -1433,7 +1433,7 @@ fn test_position_summary_health_factor_calculation() {
         .unwrap();
 
     assert_eq!(summary.health_factor, 12500);
-    assert_eq!(summary.is_liquidatable, false);
+    assert!(!summary.is_liquidatable);
 }
 
 #[test]
@@ -1466,13 +1466,13 @@ fn test_position_summary_liquidatable_status() {
         .is_ok());
     let summary_before = client.get_user_position_summary(&user);
     assert!(summary_before.health_factor >= 10000);
-    assert_eq!(summary_before.is_liquidatable, false);
+    assert!(!summary_before.is_liquidatable);
     assert!(client
-        .try_update_asset_price(&Some(usdc.clone()), &0_5000000)
+        .try_update_asset_price(&Some(usdc.clone()), &5000000)
         .is_ok());
     let summary_after = client.get_user_position_summary(&user);
     assert!(summary_after.health_factor < 10000);
-    assert_eq!(summary_after.is_liquidatable, true);
+    assert!(summary_after.is_liquidatable);
 }
 
 #[test]
@@ -1547,7 +1547,7 @@ fn test_large_amount_operations() {
     assert!(client
         .try_initialize_asset(&Some(usdc.clone()), &config)
         .is_ok());
-    let large_amount = 1_000_000_000_0000000;
+    let large_amount = 10_000_000_000_000_000;
     let deposit_result =
         client.try_ca_deposit_collateral(&user, &Some(usdc.clone()), &large_amount);
     assert!(deposit_result.is_ok());
@@ -1611,7 +1611,7 @@ fn test_asset_list_tracking() {
     let list = client.get_asset_list();
     assert_eq!(list.len(), 2);
     assert!(client
-        .try_initialize_asset(&None, &create_asset_config(&env, None, 0_1000000))
+        .try_initialize_asset(&None, &create_asset_config(&env, None, 1000000))
         .is_ok());
     let list = client.get_asset_list();
     assert_eq!(list.len(), 3);
@@ -1646,7 +1646,7 @@ fn test_complex_multi_asset_scenario() {
             &create_asset_config(&env, Some(btc.clone()), 40000_0000000)
         )
         .is_ok());
-    let xlm_config = create_asset_config(&env, None, 0_1000000);
+    let xlm_config = create_asset_config(&env, None, 1000000);
     assert!(client.try_initialize_asset(&None, &xlm_config).is_ok());
     assert!(client
         .try_ca_deposit_collateral(&user, &Some(usdc.clone()), &10000_0000000)
@@ -1670,7 +1670,7 @@ fn test_complex_multi_asset_scenario() {
         .try_ca_repay_debt(&user, &Some(usdc.clone()), &10000_0000000)
         .is_ok());
     assert!(client
-        .try_ca_withdraw_collateral(&user, &Some(btc.clone()), &0_5000000)
+        .try_ca_withdraw_collateral(&user, &Some(btc.clone()), &5000000)
         .is_ok());
     let summary = client.get_user_position_summary(&user);
     assert!(summary.total_collateral_value > 0);
@@ -1900,7 +1900,7 @@ fn test_native_and_token_assets_together() {
     let user = Address::generate(&env);
     assert!(client.try_initialize_ca(&admin).is_ok());
     assert!(client
-        .try_initialize_asset(&None, &create_asset_config(&env, None, 0_1000000))
+        .try_initialize_asset(&None, &create_asset_config(&env, None, 1000000))
         .is_ok());
     let usdc = Address::generate(&env);
     assert!(client
