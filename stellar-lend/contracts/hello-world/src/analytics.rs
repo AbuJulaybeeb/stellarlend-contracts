@@ -350,7 +350,7 @@ pub fn get_recent_activity(
     }
 
     let mut result = Vec::new(env);
-    let start = total_len.saturating_sub(offset + limit).max(0);
+    let start = total_len.saturating_sub(offset + limit);
     let end = total_len.saturating_sub(offset);
 
     for i in (start..end).rev() {

@@ -1212,7 +1212,7 @@ fn test_analytics_protocol_report_generation() {
 
     assert_eq!(report.metrics.total_deposits, 1000);
     assert_eq!(report.metrics.total_value_locked, 1000);
-    assert!(report.timestamp >= 0);
+
 }
 
 #[test]
@@ -1259,7 +1259,7 @@ fn test_analytics_get_recent_activity() {
     client.deposit_collateral(&user, &None, &300);
 
     let activities = client.get_recent_activity(&10, &0);
-    assert!(activities.len() > 0);
+    assert!(!activities.is_empty());
 }
 
 #[test]
@@ -1343,7 +1343,7 @@ fn test_analytics_large_activity_dataset() {
     }
 
     let activities = client.get_recent_activity(&100, &0);
-    assert!(activities.len() > 0);
+    assert!(!activities.is_empty());
     assert!(activities.len() <= 100);
 }
 
