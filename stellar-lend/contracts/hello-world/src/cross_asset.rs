@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Map, Symbol, Vec};
 
 #[contracttype]
