@@ -6,11 +6,13 @@
 use crate::config::BlockchainConfig;
 use crate::error::{BlockchainError, Result};
 use crate::retry::RetryStrategy;
+#[allow(unused_imports)]
 use crate::types::{
     AccountAddress, AccountResponse, NetworkInfo, Page, TransactionDetails, TransactionEnvelopeXdr,
     TransactionHash, TransactionStatus, TransactionSubmitResponse,
 };
 use reqwest::Client;
+#[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -26,6 +28,7 @@ pub struct HorizonClient {
     /// Retry strategy
     retry_strategy: RetryStrategy,
     /// Configuration
+    #[allow(dead_code)]
     config: Arc<BlockchainConfig>,
 }
 
@@ -35,7 +38,7 @@ impl HorizonClient {
         let client = Client::builder()
             .timeout(config.request_timeout)
             .build()
-            .map_err(|e| BlockchainError::NetworkError(e))?;
+            .map_err(BlockchainError::NetworkError)?;
 
         let retry_strategy = RetryStrategy::from_config(&config);
 

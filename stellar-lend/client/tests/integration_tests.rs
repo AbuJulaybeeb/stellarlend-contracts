@@ -2,12 +2,12 @@
 //!
 //! These tests use mock servers to simulate Horizon and Soroban RPC responses.
 
+use std::sync::Arc;
+use std::time::Duration;
 use stellarlend_client::{
     BlockchainClient, BlockchainConfig, MonitorOptions, MonitorResult, Network, SubmitOptions,
     TransactionStatus,
 };
-use std::sync::Arc;
-use std::time::Duration;
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, ResponseTemplate,
@@ -176,10 +176,7 @@ async fn test_horizon_get_network_info() {
     let client = BlockchainClient::new(config).unwrap();
 
     let info = client.get_network_info().await.unwrap();
-    assert_eq!(
-        info.network_passphrase,
-        "Test SDF Network ; September 2015"
-    );
+    assert_eq!(info.network_passphrase, "Test SDF Network ; September 2015");
     assert_eq!(info.current_ledger, 54321);
 }
 

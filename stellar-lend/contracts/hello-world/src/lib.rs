@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 #![no_std]
-use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol};
 
 mod borrow;
 mod deposit;
@@ -21,18 +21,13 @@ use risk_management::{
 };
 use withdraw::withdraw_collateral;
 
-mod repay;
-use repay::repay_debt;
-
-mod borrow;
-use borrow::borrow_asset;
-
 mod analytics;
 use analytics::{
     generate_protocol_report, generate_user_report, get_recent_activity, get_user_activity_feed,
     AnalyticsError, ProtocolReport, UserReport,
 };
 mod cross_asset;
+#[allow(unused_imports)]
 use cross_asset::{
     cross_asset_borrow, cross_asset_deposit, cross_asset_repay, cross_asset_withdraw,
     get_asset_config_by_address, get_asset_list, get_user_asset_position,
@@ -52,6 +47,7 @@ mod liquidate;
 use liquidate::liquidate;
 
 mod interest_rate;
+#[allow(unused_imports)]
 use interest_rate::{
     get_current_borrow_rate, get_current_supply_rate, get_current_utilization,
     initialize_interest_rate_config, set_emergency_rate_adjustment, update_interest_rate_config,
@@ -80,6 +76,9 @@ impl HelloContract {
     /// Returns Ok(()) on success
     pub fn initialize(env: Env, admin: Address) -> Result<(), RiskManagementError> {
         initialize_risk_management(&env, admin.clone())?;
+        // Initialize interest rate config with default parameters
+        initialize_interest_rate_config(&env, admin.clone())
+            .map_err(|_| RiskManagementError::Unauthorized)?;
         // initialize_governance(&env, admin).map_err(|_| RiskManagementError::Unauthorized)?;
         Ok(())
     }
@@ -113,18 +112,16 @@ impl HelloContract {
             .unwrap_or_else(|e| panic!("Deposit error: {:?}", e))
     }
 
-    /// Set risk parameters (admin only, or via governance)
+    /// Set risk parameters (admin only)
     ///
     /// Updates risk parameters with validation and change limits.
-    /// Can optionally be submitted as a governance proposal.
     ///
     /// # Arguments
-    /// * `caller` - The caller address (must be admin or proposer)
+    /// * `caller` - The caller address (must be admin)
     /// * `min_collateral_ratio` - Optional new minimum collateral ratio (in basis points)
     /// * `liquidation_threshold` - Optional new liquidation threshold (in basis points)
     /// * `close_factor` - Optional new close factor (in basis points)
     /// * `liquidation_incentive` - Optional new liquidation incentive (in basis points)
-    /// * `use_governance` - If true, this action is submitted as a governance proposal.
     ///
     /// # Returns
     /// Returns Ok(()) on success
@@ -135,48 +132,23 @@ impl HelloContract {
         liquidation_threshold: Option<i128>,
         close_factor: Option<i128>,
         liquidation_incentive: Option<i128>,
-        use_governance: bool,
     ) -> Result<(), RiskManagementError> {
-        if use_governance {
-            let action = Action::SetRiskParams(
-                min_collateral_ratio,
-                liquidation_threshold,
-                close_factor,
-                liquidation_incentive,
-            );
-            // Default voting/grace periods for now. These would likely be configurable.
-            let voting_period = 60 * 60 * 24 * 3; // 3 days
-            let grace_period = 60 * 60 * 24; // 1 day
-            Self::get_governance_client(&env)
-                .try_propose(
-                    &caller,
-                    &soroban_sdk::String::from_str(&env, "Set risk parameters"),
-                    &action,
-                    &voting_period,
-                    &grace_period,
-                )
-                .map_err(|_| RiskManagementError::GovernanceRequired)? // Note the ? here
-                .map_err(|_| RiskManagementError::GovernanceRequired)?; // Convert ClientError to RiskManagementError
-            Ok(())
-        } else {
-            set_risk_params(
-                &env,
-                caller,
-                min_collateral_ratio,
-                liquidation_threshold,
-                close_factor,
-                liquidation_incentive,
-            )
-        }
+        set_risk_params(
+            &env,
+            caller,
+            min_collateral_ratio,
+            liquidation_threshold,
+            close_factor,
+            liquidation_incentive,
+        )
     }
 
-    /// Set pause switch for an operation (admin only, or via governance)
+    /// Set pause switch for an operation (admin only)
     ///
     /// # Arguments
-    /// * `caller` - The caller address (must be admin or proposer)
+    /// * `caller` - The caller address (must be admin)
     /// * `operation` - The operation symbol (e.g., "pause_deposit", "pause_borrow")
     /// * `paused` - Whether to pause (true) or unpause (false)
-    /// * `use_governance` - If true, this action is submitted as a governance proposal.
     ///
     /// # Returns
     /// Returns Ok(()) on success
@@ -185,39 +157,15 @@ impl HelloContract {
         caller: Address,
         operation: Symbol,
         paused: bool,
-        use_governance: bool,
     ) -> Result<(), RiskManagementError> {
-        if use_governance {
-            let action = Action::SetPauseSwitch(operation.clone(), paused);
-            let voting_period = 60 * 60 * 24 * 3; // 3 days
-            let grace_period = 60 * 60 * 24; // 1 day
-            let description_str = if paused {
-                "Pause operation"
-            } else {
-                "Unpause operation"
-            };
-            Self::get_governance_client(&env)
-                .try_propose(
-                    &caller,
-                    &soroban_sdk::String::from_str(&env, description_str),
-                    &action,
-                    &voting_period,
-                    &grace_period,
-                )
-                .map_err(|_| RiskManagementError::GovernanceRequired)?
-                .map_err(|_| RiskManagementError::GovernanceRequired)?;
-            Ok(())
-        } else {
-            set_pause_switch(&env, caller, operation, paused)
-        }
+        set_pause_switch(&env, caller, operation, paused)
     }
 
-    /// Set multiple pause switches at once (admin only, or via governance)
+    /// Set multiple pause switches at once (admin only)
     ///
     /// # Arguments
-    /// * `caller` - The caller address (must be admin or proposer)
+    /// * `caller` - The caller address (must be admin)
     /// * `switches` - Map of operation symbols to pause states
-    /// * `use_governance` - If true, this action is submitted as a governance proposal.
     ///
     /// # Returns
     /// Returns Ok(()) on success
@@ -225,43 +173,17 @@ impl HelloContract {
         env: Env,
         caller: Address,
         switches: Map<Symbol, bool>,
-        use_governance: bool,
     ) -> Result<(), RiskManagementError> {
-        if use_governance {
-            let action = Action::Call(
-                env.current_contract_address(),
-                Symbol::new(&env, "set_pause_switches_internal"),
-                soroban_sdk::Vec::from_array(
-                    &env,
-                    [caller.into_val(&env), switches.into_val(&env)],
-                ),
-            );
-            let voting_period = 60 * 60 * 24 * 3; // 3 days
-            let grace_period = 60 * 60 * 24; // 1 day
-            Self::get_governance_client(&env)
-                .try_propose(
-                    &caller,
-                    &soroban_sdk::String::from_str(&env, "Set multiple pause switches"),
-                    &action,
-                    &voting_period,
-                    &grace_period,
-                )
-                .map_err(|_| RiskManagementError::GovernanceRequired)?
-                .map_err(|_| RiskManagementError::GovernanceRequired)?;
-            Ok(())
-        } else {
-            set_pause_switches(&env, caller, switches)
-        }
+        set_pause_switches(&env, caller, switches)
     }
 
-    /// Set emergency pause (admin only, or via governance)
+    /// Set emergency pause (admin only)
     ///
     /// Emergency pause stops all operations immediately.
     ///
     /// # Arguments
-    /// * `caller` - The caller address (must be admin or proposer)
+    /// * `caller` - The caller address (must be admin)
     /// * `paused` - Whether to enable (true) or disable (false) emergency pause
-    /// * `use_governance` - If true, this action is submitted as a governance proposal.
     ///
     /// # Returns
     /// Returns Ok(()) on success
@@ -269,42 +191,8 @@ impl HelloContract {
         env: Env,
         caller: Address,
         paused: bool,
-        use_governance: bool,
     ) -> Result<(), RiskManagementError> {
-        if use_governance {
-            let action = Action::SetEmergencyPause(paused);
-            let voting_period = 60 * 60 * 24 * 3; // 3 days
-            let grace_period = 60 * 60 * 24; // 1 day
-            let description_str = if paused {
-                "Enable emergency pause"
-            } else {
-                "Disable emergency pause"
-            };
-            Self::get_governance_client(&env)
-                .try_propose(
-                    &caller,
-                    &soroban_sdk::String::from_str(&env, description_str),
-                    &action,
-                    &voting_period,
-                    &grace_period,
-                )
-                .map_err(|_| RiskManagementError::GovernanceRequired)?
-                .map_err(|_| RiskManagementError::GovernanceRequired)?;
-            Ok(())
-        } else {
-            set_emergency_pause(&env, caller, paused)
-        }
-    }
-
-    /// Internal function to set multiple pause switches. Designed to be called by governance.
-    /// It's marked `pub(crate)` to be accessible within the crate but not externally.
-    #[allow(dead_code)]
-    pub(crate) fn set_pause_switches_internal(
-        env: Env,
-        caller: Address,
-        switches: Map<Symbol, bool>,
-    ) -> Result<(), RiskManagementError> {
-        set_pause_switches(&env, caller, switches)
+        set_emergency_pause(&env, caller, paused)
     }
 
     /// Get current risk configuration
@@ -796,3 +684,6 @@ impl HelloContract {
 
     // ============================================================================
 }
+
+#[cfg(test)]
+mod tests;

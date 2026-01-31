@@ -7,6 +7,7 @@ use crate::config::BlockchainConfig;
 use crate::error::{BlockchainError, Result};
 use crate::horizon::HorizonClient;
 use crate::soroban_rpc::SorobanRpcClient;
+#[allow(unused_imports)]
 use crate::types::{
     SorobanInvocationResult, TransactionDetails, TransactionHash, TransactionStatus,
 };

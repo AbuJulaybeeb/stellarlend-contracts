@@ -26,7 +26,12 @@ pub enum BlockchainError {
 
     /// Transaction failed with error code
     #[error("Transaction failed with code {code}: {message}")]
-    TransactionFailedError { code: String, message: String },
+    TransactionFailedError {
+        /// Error code from the transaction failure
+        code: String,
+        /// Error message describing the failure
+        message: String,
+    },
 
     /// Transaction not found
     #[error("Transaction not found: {0}")]

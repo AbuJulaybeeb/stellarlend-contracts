@@ -211,13 +211,6 @@ mod tests {
 
     #[test]
     fn test_is_retryable() {
-        // Network errors are retryable
-        let error = BlockchainError::NetworkError(reqwest::Error::from(
-            reqwest::Error::builder(reqwest::StatusCode::INTERNAL_SERVER_ERROR).build(),
-        ));
-        // Note: This won't work as expected due to reqwest error construction
-        // Just test with other error types
-
         // Rate limit is retryable
         assert!(RetryStrategy::is_retryable(
             &BlockchainError::RateLimitExceeded(60)
