@@ -129,9 +129,11 @@ pub struct Proposal {
 }
 
 #[contract]
+#[allow(dead_code)]
 pub struct GovernanceContract;
 
 #[contractimpl]
+#[allow(dead_code)]
 impl GovernanceContract {
     /// Initializes the governance contract.
     ///
