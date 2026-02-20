@@ -43,6 +43,13 @@ use flash_loan::{
     configure_flash_loan, execute_flash_loan, repay_flash_loan, set_flash_loan_fee, FlashLoanConfig,
 };
 
+mod bridge;
+#[allow(unused_imports)]
+use bridge::{
+    bridge_deposit, bridge_withdraw, get_bridge_config, list_bridges, register_bridge,
+    set_bridge_fee, BridgeConfig, BridgeError,
+};
+
 mod liquidate;
 use liquidate::liquidate;
 
@@ -680,6 +687,82 @@ impl HelloContract {
         adjustment_bps: i128,
     ) -> Result<(), InterestRateError> {
         set_emergency_rate_adjustment(&env, caller, adjustment_bps)
+    }
+
+    /// Register a bridge 
+    ///
+    /// # Arguments
+    /// * `caller` - Admin address for authorization
+    /// * `network_id` - ID of the remote network
+    /// * `bridge` - Address of the bridge contract
+    /// * `fee_bps` - Fee in basis points
+    pub fn register_bridge(
+        env: Env,
+        caller: Address,
+        network_id: u32,
+        bridge: Address,
+        fee_bps: i128,
+    ) -> Result<(), BridgeError> {
+        register_bridge(&env, caller, network_id, bridge, fee_bps)
+    }
+
+    /// Set bridge fee
+    /// 
+    /// # Arguments
+    /// * `caller` - Admin address for authorization
+    /// * `network_id` - ID of the remote network
+    /// * `fee_bps` - New fee in basis points
+    pub fn set_bridge_fee(
+        env: Env,
+        caller: Address,
+        network_id: u32,
+        fee_bps: i128,
+    ) -> Result<(), BridgeError> {
+        set_bridge_fee(&env, caller, network_id, fee_bps)
+    }
+
+    /// Deposit through a bridge
+    ///
+    /// # Arguments
+    /// * `user` - User depositing collateral
+    /// * `network_id` - Remote network ID
+    /// * `asset` - Asset to deposit
+    /// * `amount` - Amount to deposit
+    pub fn bridge_deposit(
+        env: Env,
+        user: Address,
+        network_id: u32,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<i128, BridgeError> {
+        bridge_deposit(&env, user, network_id, asset, amount)
+    }
+
+    /// Withdraw through a bridge
+    ///
+    /// # Arguments
+    /// * `user` - User withdrawing collateral
+    /// * `network_id` - Remote network ID
+    /// * `asset` - Asset to withdraw
+    /// * `amount` - Amount to withdraw
+    pub fn bridge_withdraw(
+        env: Env,
+        user: Address,
+        network_id: u32,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<i128, BridgeError> {
+        bridge_withdraw(&env, user, network_id, asset, amount)
+    }
+
+    /// List all bridges
+    pub fn list_bridges(env: Env) -> Map<u32, BridgeConfig> {
+        list_bridges(&env)
+    }
+
+    /// Get configuration of a specific bridge
+    pub fn get_bridge_config(env: Env, network_id: u32) -> Result<BridgeConfig, BridgeError> {
+        get_bridge_config(&env, network_id)
     }
 
     // ============================================================================
