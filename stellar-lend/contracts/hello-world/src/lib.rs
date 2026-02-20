@@ -36,7 +36,10 @@ use cross_asset::{
 };
 
 mod oracle;
-use oracle::{configure_oracle, get_price, set_fallback_oracle, update_price_feed, OracleConfig};
+use oracle::{
+    configure_oracle, get_price, set_fallback_oracle, set_primary_oracle, update_price_feed,
+    OracleConfig,
+};
 
 mod flash_loan;
 use flash_loan::{
@@ -461,6 +464,17 @@ impl HelloContract {
     /// Returns the current price
     pub fn get_price(env: Env, asset: Address) -> i128 {
         get_price(&env, &asset).unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
+    }
+
+    /// Set primary oracle for an asset (admin only)
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be admin)
+    /// * `asset` - The asset address
+    /// * `primary_oracle` - The primary oracle address
+    pub fn set_primary_oracle(env: Env, caller: Address, asset: Address, primary_oracle: Address) {
+        set_primary_oracle(&env, caller, asset, primary_oracle)
+            .unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
     }
 
     /// Set fallback oracle for an asset (admin only)
