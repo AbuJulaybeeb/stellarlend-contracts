@@ -214,10 +214,7 @@ impl BridgeContract {
         Ok(())
     }
 
-    // ── bridge_deposit ────────────────────────────────────────────────────────
-
     /// Anyone: deposit tokens into a bridge. Returns net amount after fee.
-
     pub fn bridge_deposit(
         env: Env,
         sender: Address,
@@ -265,7 +262,6 @@ impl BridgeContract {
     // ── bridge_withdraw ───────────────────────────────────────────────────────
 
     /// Admin/relayer: record a cross-chain withdrawal on-chain.
-
     pub fn bridge_withdraw(
         env: Env,
         caller: Address,
