@@ -54,6 +54,15 @@ use interest_rate::{
     InterestRateError,
 };
 
+mod amm;
+use amm::{
+    amm_add_liquidity, amm_remove_liquidity, amm_swap, initialize_amm, set_amm_pool,
+};
+pub use stellarlend_amm::{
+    AmmError, AmmProtocolConfig, AmmSettings, LiquidityParams, SwapParams,
+    TokenPair,
+};
+
 #[contract]
 pub struct HelloContract;
 
@@ -680,6 +689,72 @@ impl HelloContract {
         adjustment_bps: i128,
     ) -> Result<(), InterestRateError> {
         set_emergency_rate_adjustment(&env, caller, adjustment_bps)
+    }
+
+    /// Initialize AMM settings (admin only)
+    pub fn initialize_amm(
+        env: Env,
+        admin: Address,
+        default_slippage: i128,
+        max_slippage: i128,
+        auto_swap_threshold: i128,
+    ) -> Result<(), AmmError> {
+        initialize_amm(
+            env,
+            admin,
+            default_slippage,
+            max_slippage,
+            auto_swap_threshold,
+        )
+    }
+
+    /// Set AMM pool configuration (admin only)
+    pub fn set_amm_pool(
+        env: Env,
+        admin: Address,
+        protocol_config: AmmProtocolConfig,
+    ) -> Result<(), AmmError> {
+        set_amm_pool(env, admin, protocol_config)
+    }
+
+    /// Execute swap through AMM
+    pub fn amm_swap(env: Env, user: Address, params: SwapParams) -> Result<i128, AmmError> {
+        amm_swap(env, user, params)
+    }
+
+    /// Add liquidity to AMM pool
+    pub fn amm_add_liquidity(
+        env: Env,
+        user: Address,
+        params: LiquidityParams,
+    ) -> Result<i128, AmmError> {
+        amm_add_liquidity(env, user, params)
+    }
+
+    /// Remove liquidity from AMM pool
+    #[allow(clippy::too_many_arguments)]
+    pub fn amm_remove_liquidity(
+        env: Env,
+        user: Address,
+        protocol: Address,
+        token_a: Option<Address>,
+        token_b: Option<Address>,
+        lp_tokens: i128,
+        min_amount_a: i128,
+        min_amount_b: i128,
+        deadline: u64,
+    ) -> Result<(i128, i128), AmmError> {
+        amm_remove_liquidity(
+            env,
+            user,
+            protocol,
+            token_a,
+            token_b,
+            lp_tokens,
+            min_amount_a,
+            min_amount_b,
+            deadline,
+        )
     }
 
     // ============================================================================

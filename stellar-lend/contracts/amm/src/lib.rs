@@ -2,11 +2,12 @@
 #![allow(clippy::too_many_arguments)]
 use soroban_sdk::{contract, contractimpl, Address, Env, Map};
 
-mod amm;
-use amm::{
+pub mod amm;
+pub use crate::amm::{
     add_amm_protocol, add_liquidity, auto_swap_for_collateral, execute_swap,
     initialize_amm_settings, remove_liquidity, update_amm_settings, validate_amm_callback,
     AmmCallbackData, AmmError, AmmProtocolConfig, AmmSettings, LiquidityParams, SwapParams,
+    TokenPair,
 };
 
 #[contract]
