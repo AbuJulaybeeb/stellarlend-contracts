@@ -42,7 +42,7 @@ fn test_config_set_unauthorized() {
     let val: Val = 100_u32.into_val(&env);
 
     // Non-admin tries to set config (should panic/return err)
-    let _ = client.config_set(&malicious, &key, &val);
+    client.config_set(&malicious, &key, &val);
 }
 
 #[test]
@@ -116,5 +116,5 @@ fn test_config_restore_unauthorized() {
     let malicious = Address::generate(&env);
     let backup = Vec::new(&env);
 
-    let _ = client.config_restore(&malicious, &backup);
+    client.config_restore(&malicious, &backup);
 }
