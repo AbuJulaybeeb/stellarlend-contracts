@@ -25,7 +25,7 @@ use crate::deposit::{
     emit_user_activity_tracked_event, update_protocol_analytics, update_user_analytics, Activity,
     AssetParams, DepositDataKey, Position, ProtocolAnalytics, UserAnalytics,
 };
-use crate::events::{log_borrow, BorrowEvent};
+use crate::events::{emit_borrow, BorrowEvent};
 
 /// Errors that can occur during borrow operations
 #[contracterror]
@@ -437,7 +437,7 @@ pub fn borrow_asset(
     })?;
 
     // Emit borrow event
-    log_borrow(
+    emit_borrow(
         env,
         BorrowEvent {
             user: user.clone(),
