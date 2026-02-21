@@ -561,7 +561,13 @@ fn test_get_price_with_successful_fallback() {
 
     // Set fallback price
     let fallback_price = 105_000_000i128;
-    client.update_price_feed(&fallback_oracle, &asset, &fallback_price, &8, &fallback_oracle);
+    client.update_price_feed(
+        &fallback_oracle,
+        &asset,
+        &fallback_price,
+        &8,
+        &fallback_oracle,
+    );
 
     // Should return fallback price
     let retrieved_price = client.get_price(&asset);
