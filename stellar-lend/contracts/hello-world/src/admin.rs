@@ -144,12 +144,14 @@ pub fn revoke_role(
 }
 
 /// Check if an address has a specific role
+#[allow(dead_code)]
 pub fn has_role(env: &Env, role: Symbol, account: Address) -> bool {
     let key = AdminDataKey::Role(role, account);
     env.storage().persistent().get(&key).unwrap_or(false)
 }
 
 /// Require that the caller is either the super admin or has the required role
+#[allow(dead_code)]
 pub fn require_role_or_admin(
     env: &Env,
     caller: &Address,

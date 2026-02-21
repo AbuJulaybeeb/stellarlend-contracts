@@ -23,14 +23,14 @@ fn test_set_and_get_admin() {
     let admin = Address::generate(&env);
 
     env.as_contract(&contract_id, || {
-        assert_eq!(has_admin(&env), false);
+        assert!(!has_admin(&env));
         assert!(get_admin(&env).is_none());
 
         // First time setting admin
         let result = set_admin(&env, admin.clone(), None);
         assert_eq!(result, Ok(()));
 
-        assert_eq!(has_admin(&env), true);
+        assert!(has_admin(&env));
         assert_eq!(get_admin(&env), Some(admin.clone()));
     });
 
@@ -109,12 +109,12 @@ fn test_role_management() {
         set_admin(&env, admin.clone(), None).unwrap();
 
         // Account doesn't have role initially
-        assert_eq!(has_role(&env, role.clone(), account.clone()), false);
+        assert!(!has_role(&env, role.clone(), account.clone()));
 
         // Grant role
         let result = grant_role(&env, admin.clone(), role.clone(), account.clone());
         assert_eq!(result, Ok(()));
-        assert_eq!(has_role(&env, role.clone(), account.clone()), true);
+        assert!(has_role(&env, role.clone(), account.clone()));
     });
 
     // Verify role_granted event
@@ -131,7 +131,7 @@ fn test_role_management() {
         // Revoke role
         let result = revoke_role(&env, admin.clone(), role.clone(), account.clone());
         assert_eq!(result, Ok(()));
-        assert_eq!(has_role(&env, role.clone(), account.clone()), false);
+        assert!(!has_role(&env, role.clone(), account.clone()));
     });
 
     // Verify role_revoked event
@@ -159,7 +159,7 @@ fn test_grant_role_unauthorized() {
         // Grant role fails if not admin
         let result = grant_role(&env, unauthorized.clone(), role.clone(), account.clone());
         assert_eq!(result, Err(AdminError::Unauthorized));
-        assert_eq!(has_role(&env, role.clone(), account.clone()), false);
+        assert!(!has_role(&env, role.clone(), account.clone()));
     });
 }
 
