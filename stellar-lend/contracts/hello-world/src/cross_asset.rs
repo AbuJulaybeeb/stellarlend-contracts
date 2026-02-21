@@ -421,7 +421,8 @@ pub fn get_user_position_summary(
             total_collateral_value += collateral_value;
 
             if config.can_collateralize {
-                weighted_collateral_value += (collateral_value * config.liquidation_threshold) / 10_000;
+                weighted_collateral_value +=
+                    (collateral_value * config.liquidation_threshold) / 10_000;
             }
 
             let total_debt = position.debt_principal + position.accrued_interest;
