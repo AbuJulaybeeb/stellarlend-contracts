@@ -33,6 +33,8 @@ pub enum BorrowError {
     AssetNotSupported = 7,
     /// Borrow amount is below the configured minimum
     BelowMinimumBorrow = 8,
+    /// Repay amount exceeds current debt
+    RepayAmountTooHigh = 9,
 }
 
 /// Storage keys for borrow-related data.
@@ -180,6 +182,116 @@ pub fn borrow(
     set_total_debt(env, new_total);
 
     emit_borrow_event(env, user, asset, amount, collateral_amount);
+
+    Ok(())
+}
+
+/// Deposit collateral
+///
+/// # Arguments
+/// * `env` - The contract environment
+/// * `user` - The user's address
+/// * `asset` - The collateral asset
+/// * `amount` - The amount to deposit
+pub fn deposit(
+    env: &Env,
+    user: Address,
+    asset: Address,
+    amount: i128,
+) -> Result<(), BorrowError> {
+    if amount <= 0 {
+        return Err(BorrowError::InvalidAmount);
+    }
+
+    let mut collateral_position = get_collateral_position(env, &user);
+    
+    // If it's the first deposit, set the asset
+    if collateral_position.amount == 0 {
+        collateral_position.asset = asset.clone();
+    } else if collateral_position.asset != asset {
+        return Err(BorrowError::AssetNotSupported);
+    }
+
+    collateral_position.amount = collateral_position
+        .amount
+        .checked_add(amount)
+        .ok_or(BorrowError::Overflow)?;
+
+    save_collateral_position(env, &user, &collateral_position);
+
+    env.events().publish(
+        (Symbol::new(env, "deposit"), user),
+        (asset, amount),
+    );
+
+    Ok(())
+}
+
+/// Repay borrowed assets
+///
+/// # Arguments
+/// * `env` - The contract environment
+/// * `user` - The user's address
+/// * `asset` - The borrowed asset
+/// * `amount` - The amount to repay
+pub fn repay(
+    env: &Env,
+    user: Address,
+    asset: Address,
+    amount: i128,
+) -> Result<(), BorrowError> {
+    if amount <= 0 {
+        return Err(BorrowError::InvalidAmount);
+    }
+
+    let mut debt_position = get_debt_position(env, &user);
+    
+    if debt_position.borrowed_amount == 0 && debt_position.interest_accrued == 0 {
+        return Err(BorrowError::InvalidAmount);
+    }
+
+    if debt_position.asset != asset {
+        return Err(BorrowError::AssetNotSupported);
+    }
+
+    // First repay interest, then principal
+    let accrued_interest = calculate_interest(env, &debt_position);
+    debt_position.interest_accrued = debt_position
+        .interest_accrued
+        .checked_add(accrued_interest)
+        .ok_or(BorrowError::Overflow)?;
+    debt_position.last_update = env.ledger().timestamp();
+
+    let mut remaining_repayment = amount;
+
+    // Repay interest first
+    if remaining_repayment >= debt_position.interest_accrued {
+        remaining_repayment -= debt_position.interest_accrued;
+        debt_position.interest_accrued = 0;
+    } else {
+        debt_position.interest_accrued -= remaining_repayment;
+        remaining_repayment = 0;
+    }
+
+    // Repay principal
+    if remaining_repayment > 0 {
+        if remaining_repayment > debt_position.borrowed_amount {
+             return Err(BorrowError::RepayAmountTooHigh);
+        }
+        debt_position.borrowed_amount -= remaining_repayment;
+        
+        // Update total protocol debt
+        let total_debt = get_total_debt(env);
+        let new_total = total_debt.saturating_sub(remaining_repayment);
+        set_total_debt(env, new_total);
+    }
+
+    save_debt_position(env, &user, &debt_position);
+
+    env.events().publish(
+        (Symbol::new(env, "repay"), user),
+        (asset, amount),
+    );
 
     Ok(())
 }

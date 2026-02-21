@@ -8,16 +8,22 @@
 //! interest rate and 150% minimum collateral ratio.
 
 #![no_std]
-use soroban_sdk::{contract, contractimpl, Address, Env};
+use soroban_sdk::{contract, contractimpl, Address, Env, Val, Vec};
 
 mod borrow;
 use borrow::{
-    borrow, get_user_collateral, get_user_debt, initialize_borrow_settings, set_paused,
-    BorrowError, CollateralPosition, DebtPosition,
+    borrow, deposit, get_user_collateral, get_user_debt, initialize_borrow_settings, repay,
+    set_paused, BorrowError, CollateralPosition, DebtPosition,
 };
+
+mod token_receiver;
+use token_receiver::receive;
 
 #[cfg(test)]
 mod borrow_test;
+
+#[cfg(test)]
+mod token_receiver_test;
 
 #[contract]
 pub struct LendingContract;
@@ -112,5 +118,28 @@ impl LendingContract {
     /// CollateralPosition with amount and asset
     pub fn get_user_collateral(env: Env, user: Address) -> CollateralPosition {
         get_user_collateral(&env, &user)
+    }
+
+    /// Deposit collateral
+    pub fn deposit(env: Env, user: Address, asset: Address, amount: i128) -> Result<(), BorrowError> {
+        user.require_auth();
+        deposit(&env, user, asset, amount)
+    }
+
+    /// Repay debt
+    pub fn repay(env: Env, user: Address, asset: Address, amount: i128) -> Result<(), BorrowError> {
+        user.require_auth();
+        repay(&env, user, asset, amount)
+    }
+
+    /// Token receiver hook
+    pub fn receive(
+        env: Env,
+        token_asset: Address,
+        from: Address,
+        amount: i128,
+        payload: Vec<Val>,
+    ) -> Result<(), BorrowError> {
+        receive(env, token_asset, from, amount, payload)
     }
 }
