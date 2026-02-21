@@ -6,7 +6,7 @@ use soroban_sdk::{testutils::Address as _, Address, Env, String};
 fn setup() -> (Env, BridgeContractClient<'static>, Address) {
     let env = Env::default();
     env.mock_all_auths();
-    let id = env.register( BridgeContract,());
+    let id = env.register(BridgeContract, ());
     let client = BridgeContractClient::new(&env, &id);
     let admin = Address::generate(&env);
     client.init(&admin);
