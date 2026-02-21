@@ -45,6 +45,8 @@ pub enum DepositDataKey {
     UserAnalytics(Address),
     /// Activity log: Vec<Activity>
     ActivityLog,
+    /// Protocol reserve per asset: Map<Option<Address>, i128>
+    ProtocolReserve(Option<Address>),
 }
 
 /// Asset parameters for collateral
@@ -57,6 +59,8 @@ pub struct AssetParams {
     pub collateral_factor: i128,
     /// Maximum deposit amount
     pub max_deposit: i128,
+    /// Borrow fee in basis points (e.g., 50 = 0.5%)
+    pub borrow_fee_bps: i128,
 }
 
 /// User position tracking

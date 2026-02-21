@@ -301,6 +301,20 @@ pub fn repay_flash_loan(
         &required_repayment,
     );
 
+    // Credit fee to protocol reserve
+    if record.fee > 0 {
+        let reserve_key = DepositDataKey::ProtocolReserve(Some(asset.clone()));
+        let current_reserve = env
+            .storage()
+            .persistent()
+            .get::<DepositDataKey, i128>(&reserve_key)
+            .unwrap_or(0);
+        env.storage().persistent().set(
+            &reserve_key,
+            &(current_reserve.checked_add(record.fee).ok_or(FlashLoanError::Overflow)?),
+        );
+    }
+
     // Clear flash loan record
     clear_flash_loan(env, &user, &asset);
 
