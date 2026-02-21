@@ -6,9 +6,23 @@
 //! - Price staleness checks
 //! - Price deviation validation
 //! - Price caching with TTL
-//! - Fallback oracle support
-//! - Admin authorization
+//! - Fallback oracle support with separate storage
+//! - Admin authorization and oracle registration
 //! - Edge cases and security scenarios
+//!
+//! # Security Assumptions
+//! - Only admin can configure oracles and system parameters.
+//! - Only registered primary/fallback oracles or admin can update prices.
+//! - Price deviation checks prevent flash crash/manipulation attacks.
+//! - Stale prices are rejected to prevent using outdated market data.
+//!
+//! # Test Scenarios
+//! - `test_update_price_feed_success`: Basic price update by admin.
+//! - `test_update_price_feed_by_oracle`: Update by registered primary oracle.
+//! - `test_update_price_feed_malicious_caller`: Rejection of unauthorized oracle.
+//! - `test_get_price_with_successful_fallback`: Fallback to secondary source when primary is stale.
+//! - `test_price_deviation_*`: Validation of price change limits.
+//! - `test_cache_*`: Validation of price caching and TTL.
 
 use crate::oracle::{CachedPrice, OracleConfig, OracleDataKey, PriceFeed};
 use crate::{HelloContract, HelloContractClient};
@@ -118,7 +132,10 @@ fn test_update_price_feed_by_oracle() {
     let asset = Address::generate(&env);
     let oracle = Address::generate(&env);
 
-    // First update by admin to establish oracle
+    // Set primary oracle
+    client.set_primary_oracle(&admin, &asset, &oracle);
+
+    // First update by admin
     let initial_price = 100_000_000i128;
     client.update_price_feed(&admin, &asset, &initial_price, &8, &oracle);
 
@@ -167,6 +184,26 @@ fn test_update_price_feed_unauthorized() {
     let unauthorized = Address::generate(&env);
 
     client.update_price_feed(&unauthorized, &asset, &100_000_000, &8, &oracle);
+}
+
+/// Test malicious update where caller passes themselves as oracle
+#[test]
+#[should_panic(expected = "Oracle error")]
+fn test_update_price_feed_malicious_caller() {
+    let env = create_test_env();
+    let (_contract_id, admin, client) = setup_contract_with_admin(&env);
+    let asset = Address::generate(&env);
+    let malicious = Address::generate(&env);
+    let oracle = Address::generate(&env);
+
+    // Establish primary oracle first
+    client.set_primary_oracle(&admin, &asset, &oracle);
+    client.update_price_feed(&admin, &asset, &100_000_000, &8, &oracle);
+
+    // Malicious user tries to overwrite price by claiming to be a new oracle for this asset
+    // This now fails because malicious user is not authorized.
+    // Use a price within deviation range to ensure it fails due to authorization, not deviation.
+    client.update_price_feed(&malicious, &asset, &101_000_000, &8, &malicious);
 }
 
 // =============================================================================
@@ -496,6 +533,67 @@ fn test_get_price_stale_no_fallback() {
     env.ledger().with_mut(|li| li.timestamp = 10000);
 
     // Should fail - price is stale and no fallback configured
+    client.get_price(&asset);
+}
+
+/// Test successful price retrieval from fallback oracle when primary is stale
+#[test]
+fn test_get_price_with_successful_fallback() {
+    let env = create_test_env();
+    let (_contract_id, admin, client) = setup_contract_with_admin(&env);
+    let asset = Address::generate(&env);
+    let primary_oracle = Address::generate(&env);
+    let fallback_oracle = Address::generate(&env);
+
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+
+    // Set fallback oracle
+    client.set_fallback_oracle(&admin, &asset, &fallback_oracle);
+
+    // Set primary oracle
+    client.set_primary_oracle(&admin, &asset, &primary_oracle);
+
+    // Set primary price
+    client.update_price_feed(&admin, &asset, &100_000_000, &8, &primary_oracle);
+
+    // Move time forward beyond staleness threshold (3600s)
+    env.ledger().with_mut(|li| li.timestamp = 5000);
+
+    // Set fallback price
+    let fallback_price = 105_000_000i128;
+    client.update_price_feed(
+        &fallback_oracle,
+        &asset,
+        &fallback_price,
+        &8,
+        &fallback_oracle,
+    );
+
+    // Should return fallback price
+    let retrieved_price = client.get_price(&asset);
+    assert_eq!(retrieved_price, fallback_price);
+}
+
+/// Test retrieval fails when both primary and fallback are stale
+#[test]
+#[should_panic(expected = "Oracle error")]
+fn test_get_price_both_stale() {
+    let env = create_test_env();
+    let (_contract_id, admin, client) = setup_contract_with_admin(&env);
+    let asset = Address::generate(&env);
+    let primary_oracle = Address::generate(&env);
+    let fallback_oracle = Address::generate(&env);
+
+    client.set_primary_oracle(&admin, &asset, &primary_oracle);
+    client.set_fallback_oracle(&admin, &asset, &fallback_oracle);
+
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    client.update_price_feed(&admin, &asset, &100_000_000, &8, &primary_oracle);
+    client.update_price_feed(&fallback_oracle, &asset, &105_000_000, &8, &fallback_oracle);
+
+    // Move time beyond staleness threshold for both
+    env.ledger().with_mut(|li| li.timestamp = 10000);
+
     client.get_price(&asset);
 }
 

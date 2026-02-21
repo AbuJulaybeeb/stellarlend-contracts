@@ -5,13 +5,15 @@ edition = "2021"
 publish = false
 
 [lib]
-crate-type = ["lib", "cdylib"]
+crate-type = ["cdylib", "lib"]
 doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
-wee_alloc = "0.4.5"
 soroban-token-sdk = { workspace = true }
+stellar-contract-utils = { version = "0.6.0" }
+stellar-macros = { version = "0.6.0" }
+wee_alloc = "0.4.5"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

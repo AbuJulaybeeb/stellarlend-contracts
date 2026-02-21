@@ -196,16 +196,7 @@ fn test_swap_failure_deadline_exceeded() {
     env.mock_all_auths();
 
     // Set a known timestamp
-    env.ledger().set(soroban_sdk::testutils::LedgerInfo {
-        timestamp: 1000,
-        protocol_version: 22,
-        sequence_number: 1,
-        network_id: [0; 32],
-        base_reserve: 10,
-        max_entry_ttl: 40_000,
-        min_persistent_entry_ttl: 4_000,
-        min_temp_entry_ttl: 16,
-    });
+    env.ledger().set_timestamp(1000);
 
     let contract = create_amm_contract(&env);
     let admin = Address::generate(&env);

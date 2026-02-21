@@ -19,6 +19,10 @@
 //! - Repayment must cover principal + fee in full.
 
 #![allow(unused)]
+use crate::events::{
+    emit_flash_loan_initiated, emit_flash_loan_repaid, FlashLoanInitiatedEvent,
+    FlashLoanRepaidEvent,
+};
 use soroban_sdk::{contracterror, contracttype, Address, Env, IntoVal, Map, Symbol, Val, Vec};
 
 use crate::deposit::DepositDataKey;
@@ -257,7 +261,17 @@ pub fn execute_flash_loan(
     );
 
     // Emit flash loan initiated event
-    emit_flash_loan_event(env, &user, &asset, amount, fee, &callback, true);
+    emit_flash_loan_initiated(
+        env,
+        FlashLoanInitiatedEvent {
+            user: user.clone(),
+            asset: asset.clone(),
+            amount,
+            fee,
+            callback: callback.clone(),
+            timestamp: env.ledger().timestamp(),
+        },
+    );
 
     // Note: In a real implementation, we would call the callback here
     // For Soroban, the callback would need to be invoked by the user
@@ -325,14 +339,15 @@ pub fn repay_flash_loan(
     clear_flash_loan(env, &user, &asset);
 
     // Emit flash loan repaid event
-    emit_flash_loan_event(
+    emit_flash_loan_repaid(
         env,
-        &user,
-        &asset,
-        record.amount,
-        record.fee,
-        &record.callback,
-        false,
+        FlashLoanRepaidEvent {
+            user: user.clone(),
+            asset: asset.clone(),
+            amount: record.amount,
+            fee: record.fee,
+            timestamp: env.ledger().timestamp(),
+        },
     );
 
     Ok(())
@@ -398,37 +413,4 @@ pub fn configure_flash_loan(
     env.storage().persistent().set(&config_key, &config);
 
     Ok(())
-}
-
-/// Emit flash loan event
-fn emit_flash_loan_event(
-    env: &Env,
-    user: &Address,
-    asset: &Address,
-    amount: i128,
-    fee: i128,
-    callback: &Address,
-    is_initiated: bool,
-) {
-    let event_type = if is_initiated {
-        "flash_loan_initiated"
-    } else {
-        "flash_loan_repaid"
-    };
-    let topics = (Symbol::new(env, event_type), user.clone());
-    let mut data: Vec<Val> = Vec::new(env);
-    data.push_back(Symbol::new(env, "user").into_val(env));
-    data.push_back(user.clone().into_val(env));
-    data.push_back(Symbol::new(env, "asset").into_val(env));
-    data.push_back(asset.clone().into_val(env));
-    data.push_back(Symbol::new(env, "amount").into_val(env));
-    data.push_back(amount.into_val(env));
-    data.push_back(Symbol::new(env, "fee").into_val(env));
-    data.push_back(fee.into_val(env));
-    data.push_back(Symbol::new(env, "callback").into_val(env));
-    data.push_back(callback.clone().into_val(env));
-    data.push_back(Symbol::new(env, "timestamp").into_val(env));
-    data.push_back(env.ledger().timestamp().into_val(env));
-
-    env.events().publish(topics, data);
 }

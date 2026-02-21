@@ -2564,6 +2564,7 @@ fn test_update_price_feed_by_oracle() {
     let oracle = Address::generate(&env);
 
     client.initialize(&admin);
+    client.set_primary_oracle(&admin, &asset, &oracle);
 
     // Oracle can update its own price
     let price = 20000;

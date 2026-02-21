@@ -18,6 +18,10 @@
 //! - Only the admin address can modify risk parameters.
 
 #![allow(unused)]
+use crate::events::{
+    emit_admin_action, emit_pause_state_changed, emit_risk_params_updated, AdminActionEvent,
+    PauseStateChangedEvent, RiskParamsUpdatedEvent,
+};
 use soroban_sdk::{contracterror, contracttype, Address, Env, IntoVal, Map, Symbol, Val, Vec};
 
 /// Errors that can occur during risk management operations
@@ -155,6 +159,15 @@ pub fn initialize_risk_management(env: &Env, admin: Address) -> Result<(), RiskM
     // Initialize emergency pause as false
     let emergency_key = RiskDataKey::EmergencyPause;
     env.storage().persistent().set(&emergency_key, &false);
+
+    emit_admin_action(
+        env,
+        AdminActionEvent {
+            actor: admin.clone(),
+            action: Symbol::new(env, "initialize"),
+            timestamp: env.ledger().timestamp(),
+        },
+    );
 
     Ok(())
 }
@@ -620,58 +633,52 @@ pub fn get_liquidation_incentive(env: &Env) -> Result<i128, RiskManagementError>
 
 /// Emit risk parameters updated event
 fn emit_risk_params_updated_event(env: &Env, caller: &Address, config: &RiskConfig) {
-    let topics = (Symbol::new(env, "risk_params_updated"), caller.clone());
-    let mut data: Vec<Val> = Vec::new(env);
-    data.push_back(Symbol::new(env, "caller").into_val(env));
-    data.push_back(caller.clone().into_val(env));
-    data.push_back(Symbol::new(env, "min_collateral_ratio").into_val(env));
-    data.push_back(config.min_collateral_ratio.into_val(env));
-    data.push_back(Symbol::new(env, "liquidation_threshold").into_val(env));
-    data.push_back(config.liquidation_threshold.into_val(env));
-    data.push_back(Symbol::new(env, "close_factor").into_val(env));
-    data.push_back(config.close_factor.into_val(env));
-    data.push_back(Symbol::new(env, "liquidation_incentive").into_val(env));
-    data.push_back(config.liquidation_incentive.into_val(env));
-    data.push_back(Symbol::new(env, "timestamp").into_val(env));
-    data.push_back(config.last_update.into_val(env));
-
-    env.events().publish(topics, data);
+    emit_risk_params_updated(
+        env,
+        RiskParamsUpdatedEvent {
+            actor: caller.clone(),
+            timestamp: config.last_update,
+        },
+    );
 }
 
 /// Emit pause switch updated event
 fn emit_pause_switch_updated_event(env: &Env, caller: &Address, operation: &Symbol, paused: bool) {
-    let topics = (Symbol::new(env, "pause_switch_updated"), caller.clone());
-    let mut data: Vec<Val> = Vec::new(env);
-    data.push_back(Symbol::new(env, "caller").into_val(env));
-    data.push_back(caller.clone().into_val(env));
-    data.push_back(Symbol::new(env, "operation").into_val(env));
-    data.push_back(operation.clone().into_val(env));
-    data.push_back(Symbol::new(env, "paused").into_val(env));
-    data.push_back(paused.into_val(env));
-
-    env.events().publish(topics, data);
+    emit_pause_state_changed(
+        env,
+        PauseStateChangedEvent {
+            actor: caller.clone(),
+            operation: operation.clone(),
+            paused,
+            timestamp: env.ledger().timestamp(),
+        },
+    );
 }
 
 /// Emit pause switches updated event
 fn emit_pause_switches_updated_event(env: &Env, caller: &Address, switches: &Map<Symbol, bool>) {
-    let topics = (Symbol::new(env, "pause_switches_updated"), caller.clone());
-    let mut data: Vec<Val> = Vec::new(env);
-    data.push_back(Symbol::new(env, "caller").into_val(env));
-    data.push_back(caller.clone().into_val(env));
-    data.push_back(Symbol::new(env, "switches").into_val(env));
-    data.push_back(switches.clone().into_val(env));
-
-    env.events().publish(topics, data);
+    for (operation, paused) in switches.iter() {
+        emit_pause_state_changed(
+            env,
+            PauseStateChangedEvent {
+                actor: caller.clone(),
+                operation,
+                paused,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+    }
 }
 
 /// Emit emergency pause event
 fn emit_emergency_pause_event(env: &Env, caller: &Address, paused: bool) {
-    let topics = (Symbol::new(env, "emergency_pause"), caller.clone());
-    let mut data: Vec<Val> = Vec::new(env);
-    data.push_back(Symbol::new(env, "caller").into_val(env));
-    data.push_back(caller.clone().into_val(env));
-    data.push_back(Symbol::new(env, "paused").into_val(env));
-    data.push_back(paused.into_val(env));
-
-    env.events().publish(topics, data);
+    emit_pause_state_changed(
+        env,
+        PauseStateChangedEvent {
+            actor: caller.clone(),
+            operation: Symbol::new(env, "emergency"),
+            paused,
+            timestamp: env.ledger().timestamp(),
+        },
+    );
 }

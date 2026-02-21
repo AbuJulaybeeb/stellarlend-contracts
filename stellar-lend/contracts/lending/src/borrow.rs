@@ -10,7 +10,7 @@
 //! ## Collateral Requirements
 //! Minimum collateral ratio is 150% (15,000 basis points).
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, Symbol};
+use soroban_sdk::{contracterror, contractevent, contracttype, Address, Env};
 
 /// Errors that can occur during borrow operations.
 #[contracterror]
@@ -82,7 +82,7 @@ pub struct CollateralPosition {
 }
 
 /// Event data emitted on each borrow operation.
-#[contracttype]
+#[contractevent]
 #[derive(Clone, Debug)]
 pub struct BorrowEvent {
     /// Borrower's address
@@ -289,14 +289,14 @@ fn is_paused(env: &Env) -> bool {
 }
 
 fn emit_borrow_event(env: &Env, user: Address, asset: Address, amount: i128, collateral: i128) {
-    let event = BorrowEvent {
+    BorrowEvent {
         user,
         asset,
         amount,
         collateral,
         timestamp: env.ledger().timestamp(),
-    };
-    env.events().publish((Symbol::new(env, "borrow"),), event);
+    }
+    .publish(env);
 }
 
 /// Initialize borrow settings (admin only)

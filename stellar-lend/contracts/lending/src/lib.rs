@@ -8,6 +8,7 @@
 //! interest rate and 150% minimum collateral ratio.
 
 #![no_std]
+#![allow(deprecated)]
 use soroban_sdk::{contract, contractimpl, Address, Env};
 
 mod borrow;
@@ -16,8 +17,18 @@ use borrow::{
     BorrowError, CollateralPosition, DebtPosition,
 };
 
+mod deposit;
+use deposit::{
+    deposit, get_user_collateral as get_deposit_collateral, initialize_deposit_settings,
+    set_paused as set_deposit_paused, CollateralPosition as DepositCollateralPosition,
+    DepositError,
+};
+
 #[cfg(test)]
 mod borrow_test;
+
+#[cfg(test)]
+mod deposit_test;
 
 #[contract]
 pub struct LendingContract;
@@ -112,5 +123,75 @@ impl LendingContract {
     /// CollateralPosition with amount and asset
     pub fn get_user_collateral(env: Env, user: Address) -> CollateralPosition {
         get_user_collateral(&env, &user)
+    }
+
+    /// Deposit collateral into the protocol
+    ///
+    /// Allows users to deposit assets as collateral. Supports configured collateral
+    /// assets (XLM, USDC, etc.). Validates amounts and emits events.
+    ///
+    /// # Arguments
+    /// * `user` - The depositor's address (must authorize)
+    /// * `asset` - The collateral asset address
+    /// * `amount` - The amount to deposit
+    ///
+    /// # Returns
+    /// Returns the updated collateral balance
+    ///
+    /// # Errors
+    /// - `InvalidAmount` - Amount is zero, negative, or below minimum
+    /// - `DepositPaused` - Deposit operations are paused
+    /// - `ExceedsDepositCap` - Protocol deposit cap would be exceeded
+    /// - `Overflow` - Arithmetic overflow occurred
+    pub fn deposit(
+        env: Env,
+        user: Address,
+        asset: Address,
+        amount: i128,
+    ) -> Result<i128, DepositError> {
+        deposit(&env, user, asset, amount)
+    }
+
+    /// Initialize deposit settings (admin only)
+    ///
+    /// Sets up the protocol's deposit cap and minimum deposit amount.
+    ///
+    /// # Arguments
+    /// * `deposit_cap` - Maximum total deposits allowed
+    /// * `min_deposit_amount` - Minimum amount that can be deposited
+    pub fn initialize_deposit_settings(
+        env: Env,
+        deposit_cap: i128,
+        min_deposit_amount: i128,
+    ) -> Result<(), DepositError> {
+        initialize_deposit_settings(&env, deposit_cap, min_deposit_amount)
+    }
+
+    /// Set deposit pause state (admin only)
+    ///
+    /// Pauses or unpauses the deposit functionality.
+    ///
+    /// # Arguments
+    /// * `paused` - True to pause, false to unpause
+    pub fn set_deposit_paused(env: Env, paused: bool) -> Result<(), DepositError> {
+        set_deposit_paused(&env, paused)
+    }
+
+    /// Get user's deposit collateral position
+    ///
+    /// Returns the user's current deposit collateral position.
+    ///
+    /// # Arguments
+    /// * `user` - The user's address
+    /// * `asset` - The asset address
+    ///
+    /// # Returns
+    /// DepositCollateralPosition with amount, asset, and last deposit time
+    pub fn get_user_collateral_deposit(
+        env: Env,
+        user: Address,
+        asset: Address,
+    ) -> DepositCollateralPosition {
+        get_deposit_collateral(&env, &user, &asset)
     }
 }
