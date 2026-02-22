@@ -24,38 +24,23 @@ use deposit::{
     DepositError,
 };
 
+mod withdraw;
+use withdraw::{initialize_withdraw_settings, set_withdraw_paused, WithdrawError};
+
 #[cfg(test)]
 mod borrow_test;
 
 #[cfg(test)]
 mod deposit_test;
 
+#[cfg(test)]
+mod withdraw_test;
+
 #[contract]
 pub struct LendingContract;
 
 #[contractimpl]
 impl LendingContract {
-    /// Borrow assets against deposited collateral
-    ///
-    /// Allows users to borrow assets by providing collateral. The collateral ratio
-    /// must meet minimum requirements (150%). Interest accrues over time at 5% APY.
-    ///
-    /// # Arguments
-    /// * `user` - The borrower's address (must authorize)
-    /// * `asset` - The asset to borrow
-    /// * `amount` - The amount to borrow
-    /// * `collateral_asset` - The collateral asset
-    /// * `collateral_amount` - The collateral amount
-    ///
-    /// # Returns
-    /// Returns Ok(()) on success
-    ///
-    /// # Errors
-    /// - `InsufficientCollateral` - Collateral ratio below 150%
-    /// - `DebtCeilingReached` - Protocol debt ceiling exceeded
-    /// - `ProtocolPaused` - Protocol is paused
-    /// - `InvalidAmount` - Amount or collateral is zero or negative
-    /// - `BelowMinimumBorrow` - Amount below minimum borrow threshold
     pub fn borrow(
         env: Env,
         user: Address,
@@ -74,13 +59,6 @@ impl LendingContract {
         )
     }
 
-    /// Initialize borrow settings (admin only)
-    ///
-    /// Sets up the protocol's debt ceiling and minimum borrow amount.
-    ///
-    /// # Arguments
-    /// * `debt_ceiling` - Maximum total debt allowed in the protocol
-    /// * `min_borrow_amount` - Minimum amount that can be borrowed
     pub fn initialize_borrow_settings(
         env: Env,
         debt_ceiling: i128,
@@ -89,38 +67,14 @@ impl LendingContract {
         initialize_borrow_settings(&env, debt_ceiling, min_borrow_amount)
     }
 
-    /// Set protocol pause state (admin only)
-    ///
-    /// Pauses or unpauses the borrow functionality.
-    ///
-    /// # Arguments
-    /// * `paused` - True to pause, false to unpause
     pub fn set_paused(env: Env, paused: bool) -> Result<(), BorrowError> {
         set_paused(&env, paused)
     }
 
-    /// Get user's debt position
-    ///
-    /// Returns the user's current debt including accrued interest.
-    ///
-    /// # Arguments
-    /// * `user` - The user's address
-    ///
-    /// # Returns
-    /// DebtPosition with borrowed amount, interest, and last update time
     pub fn get_user_debt(env: Env, user: Address) -> DebtPosition {
         get_user_debt(&env, &user)
     }
 
-    /// Get user's collateral position
-    ///
-    /// Returns the user's current collateral.
-    ///
-    /// # Arguments
-    /// * `user` - The user's address
-    ///
-    /// # Returns
-    /// CollateralPosition with amount and asset
     pub fn get_user_collateral(env: Env, user: Address) -> CollateralPosition {
         get_user_collateral(&env, &user)
     }
@@ -193,5 +147,57 @@ impl LendingContract {
         asset: Address,
     ) -> DepositCollateralPosition {
         get_deposit_collateral(&env, &user, &asset)
+    }
+
+    /// Withdraw collateral from the protocol
+    ///
+    /// Allows users to withdraw deposited collateral. Validates amounts,
+    /// checks pause state, ensures sufficient balance, and enforces
+    /// minimum collateral ratio if user has outstanding debt.
+    ///
+    /// # Arguments
+    /// * `user` - The withdrawer's address (must authorize)
+    /// * `asset` - The collateral asset address
+    /// * `amount` - The amount to withdraw
+    ///
+    /// # Returns
+    /// Returns the remaining collateral balance
+    ///
+    /// # Errors
+    /// - `InvalidAmount` - Amount is zero, negative, or below minimum
+    /// - `WithdrawPaused` - Withdraw operations are paused
+    /// - `InsufficientCollateral` - User balance too low
+    /// - `InsufficientCollateralRatio` - Would violate 150% ratio
+    /// - `Overflow` - Arithmetic overflow occurred
+    pub fn withdraw(
+        env: Env,
+        user: Address,
+        asset: Address,
+        amount: i128,
+    ) -> Result<i128, WithdrawError> {
+        withdraw::withdraw(&env, user, asset, amount)
+    }
+
+    /// Initialize withdraw settings (admin only)
+    ///
+    /// Sets up the minimum withdraw amount and unpauses withdrawals.
+    ///
+    /// # Arguments
+    /// * `min_withdraw_amount` - Minimum amount that can be withdrawn
+    pub fn initialize_withdraw_settings(
+        env: Env,
+        min_withdraw_amount: i128,
+    ) -> Result<(), WithdrawError> {
+        initialize_withdraw_settings(&env, min_withdraw_amount)
+    }
+
+    /// Set withdraw pause state (admin only)
+    ///
+    /// Pauses or unpauses the withdraw functionality.
+    ///
+    /// # Arguments
+    /// * `paused` - True to pause, false to unpause
+    pub fn set_withdraw_paused(env: Env, paused: bool) -> Result<(), WithdrawError> {
+        set_withdraw_paused(&env, paused)
     }
 }

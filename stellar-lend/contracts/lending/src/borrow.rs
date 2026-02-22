@@ -41,8 +41,8 @@ pub enum BorrowError {
 pub enum BorrowDataKey {
     /// Per-user debt position
     UserDebt(Address),
-    /// Per-user collateral position
-    UserCollateral(Address),
+    /// Per-user collateral position (borrow module)
+    BorrowerCollateral(Address),
     /// Aggregate protocol debt
     TotalDebt,
     /// Maximum total debt allowed
@@ -241,7 +241,7 @@ fn save_debt_position(env: &Env, user: &Address, position: &DebtPosition) {
 fn get_collateral_position(env: &Env, user: &Address) -> CollateralPosition {
     env.storage()
         .persistent()
-        .get(&BorrowDataKey::UserCollateral(user.clone()))
+        .get(&BorrowDataKey::BorrowerCollateral(user.clone()))
         .unwrap_or(CollateralPosition {
             amount: 0,
             asset: user.clone(), // Placeholder, will be replaced on first borrow
@@ -251,7 +251,7 @@ fn get_collateral_position(env: &Env, user: &Address) -> CollateralPosition {
 fn save_collateral_position(env: &Env, user: &Address, position: &CollateralPosition) {
     env.storage()
         .persistent()
-        .set(&BorrowDataKey::UserCollateral(user.clone()), position);
+        .set(&BorrowDataKey::BorrowerCollateral(user.clone()), position);
 }
 
 fn get_total_debt(env: &Env) -> i128 {

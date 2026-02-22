@@ -42,6 +42,8 @@ pub enum InterestRateError {
     Overflow = 4,
     /// Division by zero (e.g., no deposits)
     DivisionByZero = 5,
+    /// Contract has already been initialized
+    AlreadyInitialized = 6,
 }
 
 /// Storage keys for interest rate data
@@ -118,13 +120,13 @@ pub fn get_interest_rate_config(env: &Env) -> Option<InterestRateConfig> {
 pub fn initialize_interest_rate_config(env: &Env, admin: Address) -> Result<(), InterestRateError> {
     let config_key = InterestRateDataKey::InterestRateConfig;
 
-    // Check if already initialized
+    // Guard against double initialization
     if env
         .storage()
         .persistent()
         .has::<InterestRateDataKey>(&config_key)
     {
-        return Ok(()); // Already initialized
+        return Err(InterestRateError::AlreadyInitialized);
     }
 
     let config = get_default_config();
