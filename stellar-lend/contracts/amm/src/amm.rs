@@ -48,6 +48,8 @@ pub enum AmmError {
     MinOutputNotMet = 12,
     /// Maximum input amount exceeded
     MaxInputExceeded = 13,
+    /// Contract has already been initialized
+    AlreadyInitialized = 14,
 }
 
 /// Storage keys for AMM-related data
@@ -1052,8 +1054,13 @@ pub fn initialize_amm_settings(
     max_slippage: i128,
     auto_swap_threshold: i128,
 ) -> Result<(), AmmError> {
-    // Set admin
+    // Guard against double initialization
     let admin_key = AmmDataKey::Admin;
+    if env.storage().persistent().has::<AmmDataKey>(&admin_key) {
+        return Err(AmmError::AlreadyInitialized);
+    }
+
+    // Set admin
     env.storage().persistent().set(&admin_key, &admin);
 
     let settings = AmmSettings {

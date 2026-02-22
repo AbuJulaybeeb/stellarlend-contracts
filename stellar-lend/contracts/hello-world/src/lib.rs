@@ -110,8 +110,13 @@ impl HelloContract {
     pub fn initialize(env: Env, admin: Address) -> Result<(), RiskManagementError> {
         initialize_risk_management(&env, admin.clone())?;
         // Initialize interest rate config with default parameters
-        initialize_interest_rate_config(&env, admin.clone())
-            .map_err(|_| RiskManagementError::Unauthorized)?;
+        initialize_interest_rate_config(&env, admin.clone()).map_err(|e| {
+            if e == InterestRateError::AlreadyInitialized {
+                RiskManagementError::AlreadyInitialized
+            } else {
+                RiskManagementError::Unauthorized
+            }
+        })?;
         // initialize_governance(&env, admin).map_err(|_| RiskManagementError::Unauthorized)?;
         Ok(())
     }
