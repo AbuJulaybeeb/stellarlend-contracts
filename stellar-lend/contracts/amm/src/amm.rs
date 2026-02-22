@@ -13,7 +13,9 @@
 //! stored on-chain. Callbacks must present the expected nonce to be accepted.
 
 #![allow(unused)]
-use soroban_sdk::{contracterror, contracttype, Address, Env, IntoVal, Map, Symbol, Val, Vec};
+use soroban_sdk::{
+    contracterror, contractevent, contracttype, Address, Env, IntoVal, Map, Symbol, Val, Vec,
+};
 
 /// Errors that can occur during AMM operations
 #[contracterror]
@@ -46,6 +48,8 @@ pub enum AmmError {
     MinOutputNotMet = 12,
     /// Maximum input amount exceeded
     MaxInputExceeded = 13,
+    /// Contract has already been initialized
+    AlreadyInitialized = 14,
 }
 
 /// Storage keys for AMM-related data
@@ -913,6 +917,54 @@ fn record_liquidity_operation(
 
 // Event emission functions
 
+// Event structs
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct SwapExecutedEvent {
+    pub user: Address,
+    pub protocol: Address,
+    pub amount_in: i128,
+    pub amount_out: i128,
+    pub effective_price: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct LiquidityAddedEvent {
+    pub user: Address,
+    pub protocol: Address,
+    pub amount_a: i128,
+    pub amount_b: i128,
+    pub lp_tokens: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct LiquidityRemovedEvent {
+    pub user: Address,
+    pub protocol: Address,
+    pub lp_tokens: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct AmmOperationEvent {
+    pub user: Address,
+    pub operation: Symbol,
+    pub amount_in: i128,
+    pub amount_out: i128,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct CallbackValidatedEvent {
+    pub caller: Address,
+    pub user: Address,
+    pub operation: Symbol,
+    pub nonce: u64,
+}
+
 /// Emit swap executed event
 fn emit_swap_executed_event(
     env: &Env,
@@ -921,20 +973,14 @@ fn emit_swap_executed_event(
     amount_out: i128,
     effective_price: i128,
 ) {
-    let topics = (Symbol::new(env, "swap_executed"), user.clone());
-    let mut data: Vec<Val> = Vec::new(env);
-    data.push_back(Symbol::new(env, "user").into_val(env));
-    data.push_back(user.clone().into_val(env));
-    data.push_back(Symbol::new(env, "protocol").into_val(env));
-    data.push_back(params.protocol.clone().into_val(env));
-    data.push_back(Symbol::new(env, "amount_in").into_val(env));
-    data.push_back(params.amount_in.into_val(env));
-    data.push_back(Symbol::new(env, "amount_out").into_val(env));
-    data.push_back(amount_out.into_val(env));
-    data.push_back(Symbol::new(env, "effective_price").into_val(env));
-    data.push_back(effective_price.into_val(env));
-
-    env.events().publish(topics, data);
+    SwapExecutedEvent {
+        user: user.clone(),
+        protocol: params.protocol.clone(),
+        amount_in: params.amount_in,
+        amount_out,
+        effective_price,
+    }
+    .publish(env);
 }
 
 /// Emit liquidity added event
@@ -944,20 +990,14 @@ fn emit_liquidity_added_event(
     params: &LiquidityParams,
     lp_tokens: i128,
 ) {
-    let topics = (Symbol::new(env, "liquidity_added"), user.clone());
-    let mut data: Vec<Val> = Vec::new(env);
-    data.push_back(Symbol::new(env, "user").into_val(env));
-    data.push_back(user.clone().into_val(env));
-    data.push_back(Symbol::new(env, "protocol").into_val(env));
-    data.push_back(params.protocol.clone().into_val(env));
-    data.push_back(Symbol::new(env, "amount_a").into_val(env));
-    data.push_back(params.amount_a.into_val(env));
-    data.push_back(Symbol::new(env, "amount_b").into_val(env));
-    data.push_back(params.amount_b.into_val(env));
-    data.push_back(Symbol::new(env, "lp_tokens").into_val(env));
-    data.push_back(lp_tokens.into_val(env));
-
-    env.events().publish(topics, data);
+    LiquidityAddedEvent {
+        user: user.clone(),
+        protocol: params.protocol.clone(),
+        amount_a: params.amount_a,
+        amount_b: params.amount_b,
+        lp_tokens,
+    }
+    .publish(env);
 }
 
 /// Emit liquidity removed event
@@ -967,16 +1007,12 @@ fn emit_liquidity_removed_event(
     params: &LiquidityParams,
     lp_tokens: i128,
 ) {
-    let topics = (Symbol::new(env, "liquidity_removed"), user.clone());
-    let mut data: Vec<Val> = Vec::new(env);
-    data.push_back(Symbol::new(env, "user").into_val(env));
-    data.push_back(user.clone().into_val(env));
-    data.push_back(Symbol::new(env, "protocol").into_val(env));
-    data.push_back(params.protocol.clone().into_val(env));
-    data.push_back(Symbol::new(env, "lp_tokens").into_val(env));
-    data.push_back(lp_tokens.into_val(env));
-
-    env.events().publish(topics, data);
+    LiquidityRemovedEvent {
+        user: user.clone(),
+        protocol: params.protocol.clone(),
+        lp_tokens,
+    }
+    .publish(env);
 }
 
 /// Emit AMM operation event
@@ -987,36 +1023,25 @@ fn emit_amm_operation_event(
     amount_in: i128,
     amount_out: i128,
 ) {
-    let topics = (Symbol::new(env, "amm_operation"), user.clone());
-    let mut data: Vec<Val> = Vec::new(env);
-    data.push_back(Symbol::new(env, "user").into_val(env));
-    data.push_back(user.clone().into_val(env));
-    data.push_back(Symbol::new(env, "operation").into_val(env));
-    data.push_back(operation.into_val(env));
-    data.push_back(Symbol::new(env, "amount_in").into_val(env));
-    data.push_back(amount_in.into_val(env));
-    data.push_back(Symbol::new(env, "amount_out").into_val(env));
-    data.push_back(amount_out.into_val(env));
-    data.push_back(Symbol::new(env, "timestamp").into_val(env));
-    data.push_back(env.ledger().timestamp().into_val(env));
-
-    env.events().publish(topics, data);
+    AmmOperationEvent {
+        user: user.clone(),
+        operation,
+        amount_in,
+        amount_out,
+        timestamp: env.ledger().timestamp(),
+    }
+    .publish(env);
 }
 
 /// Emit callback validated event
 fn emit_callback_validated_event(env: &Env, caller: &Address, callback_data: &AmmCallbackData) {
-    let topics = (Symbol::new(env, "callback_validated"), caller.clone());
-    let mut data: Vec<Val> = Vec::new(env);
-    data.push_back(Symbol::new(env, "caller").into_val(env));
-    data.push_back(caller.clone().into_val(env));
-    data.push_back(Symbol::new(env, "user").into_val(env));
-    data.push_back(callback_data.user.clone().into_val(env));
-    data.push_back(Symbol::new(env, "operation").into_val(env));
-    data.push_back(callback_data.operation.clone().into_val(env));
-    data.push_back(Symbol::new(env, "nonce").into_val(env));
-    data.push_back(callback_data.nonce.into_val(env));
-
-    env.events().publish(topics, data);
+    CallbackValidatedEvent {
+        caller: caller.clone(),
+        user: callback_data.user.clone(),
+        operation: callback_data.operation.clone(),
+        nonce: callback_data.nonce,
+    }
+    .publish(env);
 }
 
 // Admin functions for managing AMM protocols
@@ -1029,8 +1054,13 @@ pub fn initialize_amm_settings(
     max_slippage: i128,
     auto_swap_threshold: i128,
 ) -> Result<(), AmmError> {
-    // Set admin
+    // Guard against double initialization
     let admin_key = AmmDataKey::Admin;
+    if env.storage().persistent().has::<AmmDataKey>(&admin_key) {
+        return Err(AmmError::AlreadyInitialized);
+    }
+
+    // Set admin
     env.storage().persistent().set(&admin_key, &admin);
 
     let settings = AmmSettings {

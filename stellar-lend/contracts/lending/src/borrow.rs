@@ -10,7 +10,7 @@
 //! ## Collateral Requirements
 //! Minimum collateral ratio is 150% (15,000 basis points).
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, Symbol};
+use soroban_sdk::{contracterror, contractevent, contracttype, Address, Env};
 
 /// Errors that can occur during borrow operations.
 #[contracterror]
@@ -41,8 +41,8 @@ pub enum BorrowError {
 pub enum BorrowDataKey {
     /// Per-user debt position
     UserDebt(Address),
-    /// Per-user collateral position
-    UserCollateral(Address),
+    /// Per-user collateral position (borrow module)
+    BorrowerCollateral(Address),
     /// Aggregate protocol debt
     TotalDebt,
     /// Maximum total debt allowed
@@ -82,7 +82,7 @@ pub struct CollateralPosition {
 }
 
 /// Event data emitted on each borrow operation.
-#[contracttype]
+#[contractevent]
 #[derive(Clone, Debug)]
 pub struct BorrowEvent {
     /// Borrower's address
@@ -241,7 +241,7 @@ fn save_debt_position(env: &Env, user: &Address, position: &DebtPosition) {
 fn get_collateral_position(env: &Env, user: &Address) -> CollateralPosition {
     env.storage()
         .persistent()
-        .get(&BorrowDataKey::UserCollateral(user.clone()))
+        .get(&BorrowDataKey::BorrowerCollateral(user.clone()))
         .unwrap_or(CollateralPosition {
             amount: 0,
             asset: user.clone(), // Placeholder, will be replaced on first borrow
@@ -251,7 +251,7 @@ fn get_collateral_position(env: &Env, user: &Address) -> CollateralPosition {
 fn save_collateral_position(env: &Env, user: &Address, position: &CollateralPosition) {
     env.storage()
         .persistent()
-        .set(&BorrowDataKey::UserCollateral(user.clone()), position);
+        .set(&BorrowDataKey::BorrowerCollateral(user.clone()), position);
 }
 
 fn get_total_debt(env: &Env) -> i128 {
@@ -289,14 +289,14 @@ fn is_paused(env: &Env) -> bool {
 }
 
 fn emit_borrow_event(env: &Env, user: Address, asset: Address, amount: i128, collateral: i128) {
-    let event = BorrowEvent {
+    BorrowEvent {
         user,
         asset,
         amount,
         collateral,
         timestamp: env.ledger().timestamp(),
-    };
-    env.events().publish((Symbol::new(env, "borrow"),), event);
+    }
+    .publish(env);
 }
 
 /// Initialize borrow settings (admin only)

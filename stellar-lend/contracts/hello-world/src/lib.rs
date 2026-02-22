@@ -20,6 +20,7 @@
 //! - Emergency pause halts all operations immediately.
 
 #![allow(clippy::too_many_arguments)]
+#![allow(deprecated)]
 #![no_std]
 use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol};
 
@@ -57,7 +58,10 @@ use cross_asset::{
 };
 
 mod oracle;
-use oracle::{configure_oracle, get_price, set_fallback_oracle, update_price_feed, OracleConfig};
+use oracle::{
+    configure_oracle, get_price, set_fallback_oracle, set_primary_oracle, update_price_feed,
+    OracleConfig,
+};
 
 mod flash_loan;
 use flash_loan::{
@@ -106,8 +110,13 @@ impl HelloContract {
     pub fn initialize(env: Env, admin: Address) -> Result<(), RiskManagementError> {
         initialize_risk_management(&env, admin.clone())?;
         // Initialize interest rate config with default parameters
-        initialize_interest_rate_config(&env, admin.clone())
-            .map_err(|_| RiskManagementError::Unauthorized)?;
+        initialize_interest_rate_config(&env, admin.clone()).map_err(|e| {
+            if e == InterestRateError::AlreadyInitialized {
+                RiskManagementError::AlreadyInitialized
+            } else {
+                RiskManagementError::Unauthorized
+            }
+        })?;
         // initialize_governance(&env, admin).map_err(|_| RiskManagementError::Unauthorized)?;
         Ok(())
     }
@@ -536,6 +545,17 @@ impl HelloContract {
     /// Returns the current price
     pub fn get_price(env: Env, asset: Address) -> i128 {
         get_price(&env, &asset).unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
+    }
+
+    /// Set primary oracle for an asset (admin only)
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be admin)
+    /// * `asset` - The asset address
+    /// * `primary_oracle` - The primary oracle address
+    pub fn set_primary_oracle(env: Env, caller: Address, asset: Address, primary_oracle: Address) {
+        set_primary_oracle(&env, caller, asset, primary_oracle)
+            .unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
     }
 
     /// Set fallback oracle for an asset (admin only)
