@@ -462,11 +462,7 @@ pub fn set_fallback_oracle(
     fallback_oracle: Address,
 ) -> Result<(), OracleError> {
     // Check authorization
-    let admin = get_admin(env).ok_or(OracleError::Unauthorized)?;
-
-    if caller != admin {
-        return Err(OracleError::Unauthorized);
-    }
+    crate::admin::require_admin(env, &caller).map_err(|_| OracleError::Unauthorized)?;
 
     // Validate oracle address
     if fallback_oracle == env.current_contract_address() {
@@ -494,11 +490,7 @@ pub fn configure_oracle(
     config: OracleConfig,
 ) -> Result<(), OracleError> {
     // Check authorization
-    let admin = get_admin(env).ok_or(OracleError::Unauthorized)?;
-
-    if caller != admin {
-        return Err(OracleError::Unauthorized);
-    }
+    crate::admin::require_admin(env, &caller).map_err(|_| OracleError::Unauthorized)?;
 
     // Validate configuration
     if config.max_deviation_bps <= 0 || config.max_deviation_bps > 10000 {

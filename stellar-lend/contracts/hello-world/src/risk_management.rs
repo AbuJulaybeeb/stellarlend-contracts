@@ -63,8 +63,6 @@ pub enum RiskManagementError {
 pub enum RiskDataKey {
     /// Risk configuration parameters
     RiskConfig,
-    /// Admin address
-    Admin,
     /// Emergency pause flag
     EmergencyPause,
     /// Parameter change timelock (for safety)
@@ -138,14 +136,11 @@ const MAX_PARAMETER_CHANGE_BPS: i128 = 1_000; // 10% maximum change per update
 /// # Errors
 /// * `RiskManagementError::InvalidParameter` - If default parameters are invalid
 pub fn initialize_risk_management(env: &Env, admin: Address) -> Result<(), RiskManagementError> {
-    // Guard against double initialization – admin key must not exist yet.
-    let admin_key = RiskDataKey::Admin;
-    if env.storage().persistent().has::<RiskDataKey>(&admin_key) {
-        return Err(RiskManagementError::AlreadyInitialized);
+    // Check if initialized
+    let config_key = RiskDataKey::RiskConfig;
+    if env.storage().persistent().has(&config_key) {
+        return Ok(());
     }
-
-    // Set admin
-    env.storage().persistent().set(&admin_key, &admin);
 
     // Initialize default risk config
     let default_config = RiskConfig {
@@ -190,21 +185,15 @@ fn create_default_pause_switches(env: &Env) -> Map<Symbol, bool> {
     switches
 }
 
-/// Get the admin address
+/// Get the admin address (deprecated, delegates to new admin module)
+#[deprecated(note = "Use crate::admin::get_admin instead")]
 pub fn get_admin(env: &Env) -> Option<Address> {
-    let admin_key = RiskDataKey::Admin;
-    env.storage()
-        .persistent()
-        .get::<RiskDataKey, Address>(&admin_key)
+    crate::admin::get_admin(env)
 }
 
-/// Check if caller is admin
+/// Check if caller is admin (delegates to new admin module)
 pub fn require_admin(env: &Env, caller: &Address) -> Result<(), RiskManagementError> {
-    let admin = get_admin(env).ok_or(RiskManagementError::Unauthorized)?;
-    if admin != *caller {
-        return Err(RiskManagementError::Unauthorized);
-    }
-    Ok(())
+    crate::admin::require_admin(env, caller).map_err(|_| RiskManagementError::Unauthorized)
 }
 
 /// Get current risk configuration

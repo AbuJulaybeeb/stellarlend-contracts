@@ -21,6 +21,7 @@
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol, Vec};
 
+mod admin;
 mod borrow;
 mod deposit;
 mod errors;
@@ -73,6 +74,13 @@ use flash_loan::{
     configure_flash_loan, execute_flash_loan, repay_flash_loan, set_flash_loan_fee, FlashLoanConfig,
 };
 
+mod bridge;
+#[allow(unused_imports)]
+use bridge::{
+    bridge_deposit, bridge_withdraw, get_bridge_config, list_bridges, register_bridge,
+    set_bridge_fee, BridgeConfig, BridgeError,
+};
+
 mod liquidate;
 use liquidate::liquidate;
 
@@ -123,6 +131,13 @@ impl HelloContract {
     /// # Returns
     /// Returns Ok(()) on success
     pub fn initialize(env: Env, admin: Address) -> Result<(), RiskManagementError> {
+        // Prevent double initialization
+        if crate::admin::has_admin(&env) {
+            return Err(RiskManagementError::Unauthorized); // or a specific error
+        }
+
+        crate::admin::set_admin(&env, admin.clone(), None)
+            .map_err(|_| RiskManagementError::Unauthorized)?;
         initialize_risk_management(&env, admin.clone())?;
         initialize_interest_rate_config(&env, admin).map_err(|e| {
             if e == InterestRateError::AlreadyInitialized {
@@ -132,6 +147,39 @@ impl HelloContract {
             }
         })?;
         Ok(())
+    }
+
+    /// Transfer super admin rights
+    ///
+    /// # Arguments
+    /// * `caller` - The current admin
+    /// * `new_admin` - The new admin
+    pub fn transfer_admin(
+        env: Env,
+        caller: Address,
+        new_admin: Address,
+    ) -> Result<(), crate::admin::AdminError> {
+        crate::admin::set_admin(&env, new_admin, Some(caller))
+    }
+
+    /// Grant a role to an address (admin only)
+    pub fn grant_role(
+        env: Env,
+        caller: Address,
+        role: Symbol,
+        account: Address,
+    ) -> Result<(), crate::admin::AdminError> {
+        crate::admin::grant_role(&env, caller, role, account)
+    }
+
+    /// Revoke a role from an address (admin only)
+    pub fn revoke_role(
+        env: Env,
+        caller: Address,
+        role: Symbol,
+        account: Address,
+    ) -> Result<(), crate::admin::AdminError> {
+        crate::admin::revoke_role(&env, caller, role, account)
     }
 
     /// Deposit collateral into the protocol
@@ -161,6 +209,15 @@ impl HelloContract {
     ) -> i128 {
         deposit_collateral(&env, user, asset, amount)
             .unwrap_or_else(|e| panic!("Deposit error: {:?}", e))
+    }
+
+    /// Set native asset address (admin only). Required before using asset = None for deposit/borrow/repay.
+    pub fn set_native_asset_address(
+        env: Env,
+        caller: Address,
+        native_asset: Address,
+    ) -> Result<(), deposit::DepositError> {
+        deposit::set_native_asset_address(&env, caller, native_asset)
     }
 
     /// Set risk parameters (admin only)
@@ -1407,6 +1464,61 @@ impl HelloContract {
     /// Check if an address can vote on a proposal
     pub fn gov_can_vote(env: Env, voter: Address, proposal_id: u64) -> bool {
         governance::can_vote(&env, voter, proposal_id)
+    }
+
+    // --- Bridge ---
+
+    /// Register a new bridge (admin only)
+    pub fn register_bridge(
+        env: Env,
+        caller: Address,
+        network_id: u32,
+        bridge: Address,
+        fee_bps: i128,
+    ) -> Result<(), BridgeError> {
+        register_bridge(&env, caller, network_id, bridge, fee_bps)
+    }
+
+    /// Set fee for a bridge (admin only)
+    pub fn set_bridge_fee(
+        env: Env,
+        caller: Address,
+        network_id: u32,
+        fee_bps: i128,
+    ) -> Result<(), BridgeError> {
+        set_bridge_fee(&env, caller, network_id, fee_bps)
+    }
+
+    /// List all registered bridges
+    pub fn list_bridges(env: Env) -> Map<u32, BridgeConfig> {
+        list_bridges(&env)
+    }
+
+    /// Get configuration for a bridge by network id
+    pub fn get_bridge_config(env: Env, network_id: u32) -> Result<BridgeConfig, BridgeError> {
+        get_bridge_config(&env, network_id)
+    }
+
+    /// Deposit into protocol via a bridge
+    pub fn bridge_deposit(
+        env: Env,
+        user: Address,
+        network_id: u32,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<i128, BridgeError> {
+        bridge_deposit(&env, user, network_id, asset, amount)
+    }
+
+    /// Withdraw from protocol via a bridge
+    pub fn bridge_withdraw(
+        env: Env,
+        user: Address,
+        network_id: u32,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<i128, BridgeError> {
+        bridge_withdraw(&env, user, network_id, asset, amount)
     }
 }
 

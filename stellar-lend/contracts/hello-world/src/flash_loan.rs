@@ -26,7 +26,6 @@ use crate::events::{
 use soroban_sdk::{contracterror, contracttype, Address, Env, IntoVal, Map, Symbol, Val, Vec};
 
 use crate::deposit::DepositDataKey;
-use crate::risk_management::get_admin;
 
 /// Errors that can occur during flash loan operations
 #[contracterror]
@@ -361,11 +360,7 @@ pub fn repay_flash_loan(
 /// * `fee_bps` - The new fee in basis points
 pub fn set_flash_loan_fee(env: &Env, caller: Address, fee_bps: i128) -> Result<(), FlashLoanError> {
     // Check authorization
-    let admin = get_admin(env).ok_or(FlashLoanError::InvalidCallback)?; // Reuse error type for unauthorized
-
-    if caller != admin {
-        return Err(FlashLoanError::InvalidCallback);
-    }
+    crate::admin::require_admin(env, &caller).map_err(|_| FlashLoanError::InvalidCallback)?;
 
     // Validate fee (must be between 0 and 10000 basis points)
     if !(0..=10000).contains(&fee_bps) {
@@ -393,11 +388,7 @@ pub fn configure_flash_loan(
     config: FlashLoanConfig,
 ) -> Result<(), FlashLoanError> {
     // Check authorization
-    let admin = get_admin(env).ok_or(FlashLoanError::InvalidCallback)?;
-
-    if caller != admin {
-        return Err(FlashLoanError::InvalidCallback);
-    }
+    crate::admin::require_admin(env, &caller).map_err(|_| FlashLoanError::InvalidCallback)?;
 
     // Validate configuration
     if !(0..=10000).contains(&config.fee_bps) {

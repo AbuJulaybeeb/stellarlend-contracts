@@ -14,7 +14,6 @@ use crate::flash_loan::{
     configure_flash_loan, execute_flash_loan, repay_flash_loan, set_flash_loan_fee,
     FlashLoanConfig, FlashLoanDataKey, FlashLoanError,
 };
-use crate::risk_management::RiskDataKey;
 use crate::HelloContract;
 
 /// Setup test environment with contract context
@@ -31,7 +30,7 @@ fn setup_env() -> (Env, Address, Address, Address, Address) {
 
     // Set admin in contract context
     env.as_contract(&contract_id, || {
-        env.storage().persistent().set(&RiskDataKey::Admin, &admin);
+        crate::admin::set_admin(&env, admin.clone(), None).unwrap();
     });
 
     (env, contract_id, admin, user, token_address)
