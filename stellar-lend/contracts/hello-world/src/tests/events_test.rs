@@ -10,7 +10,6 @@
 ///   - `Vec<Val>` – topic(s) tuple
 ///   - `Val` – event data payload
 
-#![allow(unused_variables)]
 use crate::events::{
     emit_admin_action, emit_borrow, emit_deposit, emit_flash_loan_initiated,
     emit_flash_loan_repaid, emit_liquidation, emit_pause_state_changed, emit_price_updated,
