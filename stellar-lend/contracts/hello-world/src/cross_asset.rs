@@ -25,15 +25,17 @@ use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Map, 
 pub struct AssetConfig {
     /// Asset contract address (None for native XLM)
     pub asset: Option<Address>,
-    /// Collateral factor in basis points (e.g., 7500 = 75%)
+    /// Collateral factor (LTV) in basis points (e.g., 7500 = 75%)
+    /// Maximum percentage of collateral value that can be borrowed
     pub collateral_factor: i128,
-    /// Borrow factor in basis points (e.g., 8000 = 80%)
-    pub borrow_factor: i128,
+    /// Liquidation threshold in basis points (e.g., 8000 = 80%)
+    /// Health factor below this triggers liquidation
+    pub liquidation_threshold: i128,
     /// Reserve factor in basis points (e.g., 1000 = 10%)
     pub reserve_factor: i128,
     /// Maximum supply cap (0 = unlimited)
     pub max_supply: i128,
-    /// Maximum borrow cap (0 = unlimited)
+    /// Maximum borrow cap / debt ceiling (0 = unlimited)
     pub max_borrow: i128,
     /// Whether asset is enabled for collateral
     pub can_collateralize: bool,
@@ -206,10 +208,10 @@ pub fn initialize_asset(
 /// # Arguments
 /// * `env` - The contract environment
 /// * `asset` - Asset to update (`None` for XLM)
-/// * `collateral_factor` - Optional new collateral factor (basis points)
-/// * `borrow_factor` - Optional new borrow factor (basis points)
+/// * `collateral_factor` - Optional new collateral factor/LTV (basis points)
+/// * `liquidation_threshold` - Optional new liquidation threshold (basis points)
 /// * `max_supply` - Optional new supply cap
-/// * `max_borrow` - Optional new borrow cap
+/// * `max_borrow` - Optional new borrow cap/debt ceiling
 /// * `can_collateralize` - Optional flag to enable/disable as collateral
 /// * `can_borrow` - Optional flag to enable/disable borrowing
 ///
@@ -221,7 +223,7 @@ pub fn update_asset_config(
     env: &Env,
     asset: Option<Address>,
     collateral_factor: Option<i128>,
-    borrow_factor: Option<i128>,
+    liquidation_threshold: Option<i128>,
     max_supply: Option<i128>,
     max_borrow: Option<i128>,
     can_collateralize: Option<bool>,
@@ -237,9 +239,9 @@ pub fn update_asset_config(
         config.collateral_factor = cf;
     }
 
-    if let Some(bf) = borrow_factor {
-        require_valid_basis_points(bf)?;
-        config.borrow_factor = bf;
+    if let Some(lt) = liquidation_threshold {
+        require_valid_basis_points(lt)?;
+        config.liquidation_threshold = lt;
     }
 
     if let Some(ms) = max_supply {
@@ -419,16 +421,15 @@ pub fn get_user_position_summary(
             total_collateral_value += collateral_value;
 
             if config.can_collateralize {
-                weighted_collateral_value += (collateral_value * config.collateral_factor) / 10_000;
+                weighted_collateral_value +=
+                    (collateral_value * config.liquidation_threshold) / 10_000;
             }
 
             let total_debt = position.debt_principal + position.accrued_interest;
             let debt_value = (total_debt * config.price) / 10_000_000;
             total_debt_value += debt_value;
 
-            if config.can_borrow {
-                weighted_debt_value += (debt_value * config.borrow_factor) / 10_000;
-            }
+            weighted_debt_value += debt_value;
         }
     }
 
@@ -720,11 +721,16 @@ fn get_asset_config(env: &Env, asset_key: &AssetKey) -> Result<AssetConfig, Cros
 
 fn require_valid_config(config: &AssetConfig) -> Result<(), CrossAssetError> {
     require_valid_basis_points(config.collateral_factor)?;
-    require_valid_basis_points(config.borrow_factor)?;
+    require_valid_basis_points(config.liquidation_threshold)?;
     require_valid_basis_points(config.reserve_factor)?;
 
     if config.price <= 0 {
         return Err(CrossAssetError::InvalidPrice);
+    }
+
+    // Liquidation threshold must be >= collateral factor (LTV)
+    if config.liquidation_threshold < config.collateral_factor {
+        return Err(CrossAssetError::AssetNotConfigured);
     }
 
     Ok(())

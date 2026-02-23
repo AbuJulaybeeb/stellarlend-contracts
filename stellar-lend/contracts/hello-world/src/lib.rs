@@ -82,6 +82,8 @@ use interest_rate::{
     InterestRateError,
 };
 
+pub mod governance;
+
 /// The StellarLend core contract.
 ///
 /// Provides the public API for all lending protocol operations. Each method
@@ -839,6 +841,243 @@ impl HelloContract {
         backup: soroban_sdk::Vec<(soroban_sdk::Symbol, soroban_sdk::Val)>,
     ) -> Result<(), ConfigError> {
         config_restore(&env, caller, backup)
+    }
+
+    // ============================================================================
+    // Cross-Asset / Asset Configuration Methods
+    // ============================================================================
+
+    /// Initialize cross-asset lending module (admin only)
+    ///
+    /// Sets up the cross-asset lending system with an admin.
+    /// Must be called before any asset configuration.
+    ///
+    /// # Arguments
+    /// * `admin` - The admin address
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn initialize_ca(env: Env, admin: Address) -> Result<(), CrossAssetError> {
+        initialize(&env, admin)
+    }
+
+    /// Initialize/register a new asset with configuration
+    ///
+    /// Registers an asset with its collateral factor (LTV), liquidation threshold,
+    /// debt ceiling, and other parameters. Admin only.
+    ///
+    /// # Arguments
+    /// * `asset` - Asset address (None for native XLM)
+    /// * `config` - Complete asset configuration
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn initialize_asset(
+        env: Env,
+        asset: Option<Address>,
+        config: AssetConfig,
+    ) -> Result<(), CrossAssetError> {
+        initialize_asset(&env, asset, config)
+    }
+
+    /// Update asset configuration (admin only)
+    ///
+    /// Updates asset parameters including LTV, liquidation threshold, debt ceiling,
+    /// and collateral/borrow enablement. Only provided fields are updated.
+    ///
+    /// # Arguments
+    /// * `asset` - Asset address (None for XLM)
+    /// * `collateral_factor` - Optional new LTV in basis points
+    /// * `liquidation_threshold` - Optional new liquidation threshold in basis points
+    /// * `max_supply` - Optional new supply cap
+    /// * `max_borrow` - Optional new debt ceiling
+    /// * `can_collateralize` - Optional flag to enable/disable as collateral
+    /// * `can_borrow` - Optional flag to enable/disable borrowing
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_asset_config(
+        env: Env,
+        asset: Option<Address>,
+        collateral_factor: Option<i128>,
+        liquidation_threshold: Option<i128>,
+        max_supply: Option<i128>,
+        max_borrow: Option<i128>,
+        can_collateralize: Option<bool>,
+        can_borrow: Option<bool>,
+    ) -> Result<(), CrossAssetError> {
+        update_asset_config(
+            &env,
+            asset,
+            collateral_factor,
+            liquidation_threshold,
+            max_supply,
+            max_borrow,
+            can_collateralize,
+            can_borrow,
+        )
+    }
+
+    /// Update asset price (admin/oracle only)
+    ///
+    /// Updates the price for an asset used in health factor calculations.
+    ///
+    /// # Arguments
+    /// * `asset` - Asset address (None for XLM)
+    /// * `price` - New price in base units (7 decimals)
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn update_asset_price(
+        env: Env,
+        asset: Option<Address>,
+        price: i128,
+    ) -> Result<(), CrossAssetError> {
+        update_asset_price(&env, asset, price)
+    }
+
+    /// Get asset configuration
+    ///
+    /// Returns the configuration for a specific asset including LTV,
+    /// liquidation threshold, debt ceiling, etc.
+    ///
+    /// # Arguments
+    /// * `asset` - Asset address (None for XLM)
+    ///
+    /// # Returns
+    /// Asset configuration
+    pub fn get_asset_config(
+        env: Env,
+        asset: Option<Address>,
+    ) -> Result<AssetConfig, CrossAssetError> {
+        get_asset_config_by_address(&env, asset)
+    }
+
+    /// Get list of all configured assets
+    ///
+    /// Returns all assets that have been registered in the system.
+    ///
+    /// # Returns
+    /// Vector of asset keys
+    pub fn get_asset_list(env: Env) -> soroban_sdk::Vec<AssetKey> {
+        get_asset_list(&env)
+    }
+
+    /// Deposit collateral for cross-asset lending
+    ///
+    /// Deposits collateral that can be used across multiple assets.
+    /// Asset must be enabled for collateral.
+    ///
+    /// # Arguments
+    /// * `user` - User address
+    /// * `asset` - Asset address (None for XLM)
+    /// * `amount` - Amount to deposit
+    ///
+    /// # Returns
+    /// Updated asset position
+    pub fn cross_asset_deposit(
+        env: Env,
+        user: Address,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<AssetPosition, CrossAssetError> {
+        cross_asset_deposit(&env, user, asset, amount)
+    }
+
+    /// Withdraw collateral from cross-asset lending
+    ///
+    /// Withdraws collateral while maintaining healthy position.
+    ///
+    /// # Arguments
+    /// * `user` - User address
+    /// * `asset` - Asset address (None for XLM)
+    /// * `amount` - Amount to withdraw
+    ///
+    /// # Returns
+    /// Updated asset position
+    pub fn cross_asset_withdraw(
+        env: Env,
+        user: Address,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<AssetPosition, CrossAssetError> {
+        cross_asset_withdraw(&env, user, asset, amount)
+    }
+
+    /// Borrow asset in cross-asset lending
+    ///
+    /// Borrows against cross-asset collateral. Respects LTV and debt ceiling.
+    ///
+    /// # Arguments
+    /// * `user` - User address
+    /// * `asset` - Asset address (None for XLM)
+    /// * `amount` - Amount to borrow
+    ///
+    /// # Returns
+    /// Updated asset position
+    pub fn cross_asset_borrow(
+        env: Env,
+        user: Address,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<AssetPosition, CrossAssetError> {
+        cross_asset_borrow(&env, user, asset, amount)
+    }
+
+    /// Repay borrowed asset
+    ///
+    /// Repays debt for a specific asset.
+    ///
+    /// # Arguments
+    /// * `user` - User address
+    /// * `asset` - Asset address (None for XLM)
+    /// * `amount` - Amount to repay
+    ///
+    /// # Returns
+    /// Updated asset position
+    pub fn cross_asset_repay(
+        env: Env,
+        user: Address,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<AssetPosition, CrossAssetError> {
+        cross_asset_repay(&env, user, asset, amount)
+    }
+
+    /// Get user's position for a specific asset
+    ///
+    /// Returns collateral and debt for a user in a specific asset.
+    ///
+    /// # Arguments
+    /// * `user` - User address
+    /// * `asset` - Asset address (None for XLM)
+    ///
+    /// # Returns
+    /// Asset position
+    pub fn get_user_asset_position(
+        env: Env,
+        user: Address,
+        asset: Option<Address>,
+    ) -> AssetPosition {
+        get_user_asset_position(&env, &user, asset)
+    }
+
+    /// Get user's unified position summary across all assets
+    ///
+    /// Calculates health factor, liquidation status, and borrow capacity
+    /// across all assets.
+    ///
+    /// # Arguments
+    /// * `user` - User address
+    ///
+    /// # Returns
+    /// Position summary with health factor
+    pub fn get_user_position_summary(
+        env: Env,
+        user: Address,
+    ) -> Result<UserPositionSummary, CrossAssetError> {
+        get_user_position_summary(&env, &user)
     }
 
     // ============================================================================
