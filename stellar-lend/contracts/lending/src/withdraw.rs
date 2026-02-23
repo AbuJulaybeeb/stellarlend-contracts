@@ -204,4 +204,3 @@ fn is_paused(env: &Env) -> bool {
         .get(&WithdrawDataKey::Paused)
         .unwrap_or(false)
 }
-
