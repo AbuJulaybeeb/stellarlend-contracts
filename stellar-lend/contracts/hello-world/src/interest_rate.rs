@@ -25,7 +25,6 @@
 use soroban_sdk::{contracterror, contracttype, Address, Env, IntoVal};
 
 use crate::deposit::{DepositDataKey, ProtocolAnalytics};
-use crate::risk_management::get_admin;
 
 /// Errors that can occur during interest rate operations
 #[contracterror]
@@ -53,8 +52,6 @@ pub enum InterestRateError {
 pub enum InterestRateDataKey {
     /// Interest rate configuration
     InterestRateConfig,
-    /// Admin address
-    Admin,
     /// Emergency rate adjustment flag
     EmergencyRateAdjustment,
 }
@@ -131,10 +128,6 @@ pub fn initialize_interest_rate_config(env: &Env, admin: Address) -> Result<(), 
 
     let config = get_default_config();
     env.storage().persistent().set(&config_key, &config);
-
-    // Store admin
-    let admin_key = InterestRateDataKey::Admin;
-    env.storage().persistent().set(&admin_key, &admin);
 
     Ok(())
 }
@@ -322,16 +315,7 @@ pub fn update_interest_rate_config(
     spread_bps: Option<i128>,
 ) -> Result<(), InterestRateError> {
     // Check authorization
-    let admin_key = InterestRateDataKey::Admin;
-    let admin = env
-        .storage()
-        .persistent()
-        .get::<InterestRateDataKey, Address>(&admin_key)
-        .ok_or(InterestRateError::Unauthorized)?;
-
-    if caller != admin {
-        return Err(InterestRateError::Unauthorized);
-    }
+    crate::admin::require_admin(env, &caller).map_err(|_| InterestRateError::Unauthorized)?;
 
     let config_key = InterestRateDataKey::InterestRateConfig;
     let mut config = get_interest_rate_config(env).ok_or(InterestRateError::InvalidParameter)?;
@@ -410,16 +394,7 @@ pub fn set_emergency_rate_adjustment(
     adjustment_bps: i128,
 ) -> Result<(), InterestRateError> {
     // Check authorization
-    let admin_key = InterestRateDataKey::Admin;
-    let admin = env
-        .storage()
-        .persistent()
-        .get::<InterestRateDataKey, Address>(&admin_key)
-        .ok_or(InterestRateError::Unauthorized)?;
-
-    if caller != admin {
-        return Err(InterestRateError::Unauthorized);
-    }
+    crate::admin::require_admin(env, &caller).map_err(|_| InterestRateError::Unauthorized)?;
 
     // Validate adjustment is within reasonable bounds
     if adjustment_bps.abs() > BASIS_POINTS_SCALE {

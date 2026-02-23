@@ -72,6 +72,8 @@ pub enum DepositDataKey {
     UserAnalytics(Address),
     /// Activity log: Vec<Activity>
     ActivityLog,
+    /// Native asset (XLM) contract address
+    NativeAssetAddress,
 }
 
 /// Asset parameters for collateral

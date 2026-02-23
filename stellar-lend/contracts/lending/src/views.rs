@@ -1,0 +1,250 @@
+//! # Views — Read-only position and health factor queries
+//!
+//! Provides gas-efficient, read-only view functions for frontends and liquidations:
+//! collateral value, debt value, health factor, and position summary.
+//! All functions perform **no state changes** and use the admin-configured oracle for pricing.
+//!
+//! ## Security
+//! - View functions do not modify contract or user state.
+//! - Collateral and debt values depend on the oracle; ensure the oracle is correct and trusted.
+//! - Health factor uses the admin-set liquidation threshold consistently.
+
+use soroban_sdk::{contracttype, Address, Env, IntoVal, Symbol};
+
+use crate::borrow::{
+    get_liquidation_threshold_bps, get_oracle, get_user_collateral, get_user_debt,
+    BorrowCollateral, DebtPosition,
+};
+
+/// Scale for oracle price (1e8 = one unit). Value = amount * price / PRICE_SCALE.
+const PRICE_SCALE: i128 = 100_000_000;
+
+/// Health factor scale: 10000 = 1.0 (healthy). Below 10000 = liquidatable.
+pub const HEALTH_FACTOR_SCALE: i128 = 10000;
+
+/// Sentinel health factor when user has no debt (position is healthy).
+pub const HEALTH_FACTOR_NO_DEBT: i128 = 100_000_000;
+
+/// Summary of a user's borrow position for frontends and liquidations.
+///
+/// All value fields use a common unit (e.g. USD with 8 decimals) when oracle is set.
+/// When oracle is not set, `collateral_value` and `debt_value` are 0 and `health_factor` is 0.
+#[contracttype]
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UserPositionSummary {
+    /// User's collateral balance (raw amount)
+    pub collateral_balance: i128,
+    /// Collateral value in common unit (e.g. USD 8 decimals). 0 if oracle not set.
+    pub collateral_value: i128,
+    /// User's debt balance (principal + accrued interest)
+    pub debt_balance: i128,
+    /// Debt value in common unit. 0 if oracle not set.
+    pub debt_value: i128,
+    /// Health factor scaled by 10000 (10000 = 1.0). 0 if oracle not set or unconfigured.
+    pub health_factor: i128,
+}
+
+/// Fetches price for `asset` from the configured oracle contract.
+///
+/// The oracle must implement a function with symbol `"price"` taking one `Address` argument
+/// and returning an `i128` price with 8 decimals (PRICE_SCALE).
+///
+/// # Security
+/// This is read-only; no state is modified. Oracle is trusted (admin-configured).
+#[inline]
+fn get_asset_price(env: &Env, oracle: &Address, asset: &Address) -> i128 {
+    env.invoke_contract(
+        oracle,
+        &Symbol::new(env, "price"),
+        (asset.clone(),).into_val(env),
+    )
+}
+
+/// Computes collateral value in common unit (amount * price / PRICE_SCALE).
+/// Returns 0 if oracle is not set or amount is zero.
+#[inline]
+fn collateral_value(env: &Env, collateral: &BorrowCollateral) -> i128 {
+    if collateral.amount <= 0 {
+        return 0;
+    }
+    let Some(oracle) = get_oracle(env) else {
+        return 0;
+    };
+    let price = get_asset_price(env, &oracle, &collateral.asset);
+    if price <= 0 {
+        return 0;
+    }
+    collateral
+        .amount
+        .checked_mul(price)
+        .and_then(|v| v.checked_div(PRICE_SCALE))
+        .unwrap_or(0)
+}
+
+/// Computes debt value in common unit (total debt * price / PRICE_SCALE).
+/// Returns 0 if oracle is not set or debt is zero.
+#[inline]
+fn debt_value(env: &Env, position: &DebtPosition) -> i128 {
+    let total_debt = position
+        .borrowed_amount
+        .checked_add(position.interest_accrued)
+        .unwrap_or(0);
+    if total_debt <= 0 {
+        return 0;
+    }
+    let Some(oracle) = get_oracle(env) else {
+        return 0;
+    };
+    let price = get_asset_price(env, &oracle, &position.asset);
+    if price <= 0 {
+        return 0;
+    }
+    total_debt
+        .checked_mul(price)
+        .and_then(|v| v.checked_div(PRICE_SCALE))
+        .unwrap_or(0)
+}
+
+/// Computes health factor from collateral value, debt value, and liquidation threshold.
+///
+/// Formula: `health_factor = (collateral_value * liquidation_threshold_bps / 10000) * HEALTH_FACTOR_SCALE / debt_value`
+/// So 10000 = 1.0; above 10000 is healthy, below is liquidatable.
+///
+/// Returns `HEALTH_FACTOR_NO_DEBT` when debt is zero (position is healthy).
+/// Returns 0 when oracle is not set but user has debt (cannot compute).
+#[inline]
+fn compute_health_factor(
+    env: &Env,
+    collateral_value: i128,
+    debt_value: i128,
+    has_debt: bool,
+) -> i128 {
+    if debt_value <= 0 {
+        if has_debt {
+            return 0; // Oracle not set; cannot compute
+        }
+        return HEALTH_FACTOR_NO_DEBT;
+    }
+    let Some(_) = get_oracle(env) else {
+        return 0;
+    };
+    let bps = get_liquidation_threshold_bps(env);
+    let weighted_collateral = collateral_value
+        .checked_mul(bps)
+        .and_then(|v| v.checked_div(10000))
+        .unwrap_or(0);
+    weighted_collateral
+        .checked_mul(HEALTH_FACTOR_SCALE)
+        .and_then(|v| v.checked_div(debt_value))
+        .unwrap_or(0)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Public view functions (read-only; no state changes)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Returns the user's collateral balance (raw amount and asset from borrow position).
+///
+/// # Arguments
+/// * `env` - Contract environment
+/// * `user` - User address
+///
+/// # Returns
+/// The stored collateral amount. 0 if user has no collateral.
+///
+/// # Security
+/// Read-only; no state change. Uses existing borrow storage.
+pub fn get_collateral_balance(env: &Env, user: &Address) -> i128 {
+    let collateral = get_user_collateral(env, user);
+    collateral.amount
+}
+
+/// Returns the user's debt balance (principal + accrued interest).
+///
+/// # Arguments
+/// * `env` - Contract environment
+/// * `user` - User address
+///
+/// # Returns
+/// Total debt in raw units. 0 if user has no debt.
+///
+/// # Security
+/// Read-only; no state change. Uses existing borrow storage and interest accrual.
+pub fn get_debt_balance(env: &Env, user: &Address) -> i128 {
+    let position = get_user_debt(env, user);
+    position
+        .borrowed_amount
+        .checked_add(position.interest_accrued)
+        .unwrap_or(0)
+}
+
+/// Returns the user's collateral value in the common unit (e.g. USD 8 decimals).
+///
+/// Uses the admin-configured oracle. Returns 0 if oracle is not set or price unavailable.
+///
+/// # Security
+/// Read-only; no state change. Oracle is trusted (admin-configured).
+pub fn get_collateral_value(env: &Env, user: &Address) -> i128 {
+    let collateral = get_user_collateral(env, user);
+    collateral_value(env, &collateral)
+}
+
+/// Returns the user's debt value in the common unit (e.g. USD 8 decimals).
+///
+/// Uses the admin-configured oracle. Returns 0 if oracle is not set or price unavailable.
+///
+/// # Security
+/// Read-only; no state change. Oracle is trusted (admin-configured).
+pub fn get_debt_value(env: &Env, user: &Address) -> i128 {
+    let position = get_user_debt(env, user);
+    debt_value(env, &position)
+}
+
+/// Returns the user's health factor (scaled by 10000; 10000 = 1.0).
+///
+/// Computed from collateral value, debt value, and liquidation threshold.
+/// - Above 10000: healthy
+/// - Below 10000: liquidatable
+/// - Returns `HEALTH_FACTOR_NO_DEBT` when user has no debt
+/// - Returns 0 when oracle is not set or values cannot be computed
+///
+/// # Security
+/// Read-only; no state change. Correct oracle and liquidation threshold usage.
+pub fn get_health_factor(env: &Env, user: &Address) -> i128 {
+    let collateral = get_user_collateral(env, user);
+    let position = get_user_debt(env, user);
+    let debt_balance = position
+        .borrowed_amount
+        .checked_add(position.interest_accrued)
+        .unwrap_or(0);
+    let cv = collateral_value(env, &collateral);
+    let dv = debt_value(env, &position);
+    compute_health_factor(env, cv, dv, debt_balance > 0)
+}
+
+/// Returns a full position summary for the user (collateral balance/value, debt balance/value, health factor).
+///
+/// Single read-only call for frontends and liquidation bots.
+///
+/// # Security
+/// Read-only; no state change. Correct oracle and liquidation threshold usage.
+pub fn get_user_position(env: &Env, user: &Address) -> UserPositionSummary {
+    let collateral = get_user_collateral(env, user);
+    let position = get_user_debt(env, user);
+    let debt_balance = position
+        .borrowed_amount
+        .checked_add(position.interest_accrued)
+        .unwrap_or(0);
+    let collateral_value_usd = collateral_value(env, &collateral);
+    let debt_value_usd = debt_value(env, &position);
+    let health_factor =
+        compute_health_factor(env, collateral_value_usd, debt_value_usd, debt_balance > 0);
+
+    UserPositionSummary {
+        collateral_balance: collateral.amount,
+        collateral_value: collateral_value_usd,
+        debt_balance,
+        debt_value: debt_value_usd,
+        health_factor,
+    }
+}

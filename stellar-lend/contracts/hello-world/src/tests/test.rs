@@ -4799,6 +4799,11 @@ fn test_analytics_activity_timestamp_ordering() {
 
 /// Test protocol report contains all required fields
 #[test]
+#[allow(
+    clippy::absurd_extreme_comparisons,
+    clippy::double_comparisons,
+    unused_comparisons
+)]
 fn test_analytics_protocol_report_complete() {
     let env = create_test_env();
     let contract_id = env.register(HelloContract, ());
