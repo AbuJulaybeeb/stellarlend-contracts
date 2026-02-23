@@ -283,4 +283,6 @@ impl AmmContract {
 }
 
 #[cfg(test)]
+mod liquidate_test;
+#[cfg(test)]
 mod test;
