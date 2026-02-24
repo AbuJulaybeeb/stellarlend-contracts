@@ -28,8 +28,8 @@ use views::{
 
 mod withdraw;
 use withdraw::{initialize_withdraw_settings, set_withdraw_paused, WithdrawError};
-mod upgrade;
 mod data_store;
+mod upgrade;
 
 #[cfg(test)]
 mod borrow_test;
@@ -46,11 +46,11 @@ mod flash_loan_test;
 mod views_test;
 
 #[cfg(test)]
-mod withdraw_test;
+mod data_store_test;
 #[cfg(test)]
 mod upgrade_test;
 #[cfg(test)]
-mod data_store_test;
+mod withdraw_test;
 
 #[contract]
 pub struct LendingContract;

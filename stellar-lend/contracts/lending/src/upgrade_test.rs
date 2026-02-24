@@ -1,9 +1,4 @@
-#![cfg(test)]
-
-use soroban_sdk::{
-    testutils::Address as _,
-    Address, BytesN, Env, Error, InvokeError,
-};
+use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, Error, InvokeError};
 
 use crate::upgrade::{UpgradeManager, UpgradeManagerClient, UpgradeStage};
 
@@ -135,7 +130,10 @@ fn test_upgrade_approve_flow_and_status_transition() {
 
     let count = client.upgrade_approve(&approver, &proposal_id);
     assert_eq!(count, 2);
-    assert_eq!(client.upgrade_status(&proposal_id).stage, UpgradeStage::Approved);
+    assert_eq!(
+        client.upgrade_status(&proposal_id).stage,
+        UpgradeStage::Approved
+    );
 
     let duplicate = client.try_upgrade_approve(&approver, &proposal_id);
     assert_failed(duplicate);
@@ -178,7 +176,10 @@ fn test_upgrade_execute_updates_current_version_and_hash() {
 
     assert_eq!(client.current_version(), 3);
     assert_eq!(client.current_wasm_hash(), next_hash);
-    assert_eq!(client.upgrade_status(&proposal_id).stage, UpgradeStage::Executed);
+    assert_eq!(
+        client.upgrade_status(&proposal_id).stage,
+        UpgradeStage::Executed
+    );
 
     let repeated = client.try_upgrade_execute(&admin, &proposal_id);
     assert_failed(repeated);
@@ -213,7 +214,10 @@ fn test_upgrade_rollback_restores_previous_version_and_hash() {
     client.upgrade_rollback(&admin, &proposal_id);
     assert_eq!(client.current_version(), 0);
     assert_eq!(client.current_wasm_hash(), initial_hash);
-    assert_eq!(client.upgrade_status(&proposal_id).stage, UpgradeStage::RolledBack);
+    assert_eq!(
+        client.upgrade_status(&proposal_id).stage,
+        UpgradeStage::RolledBack
+    );
 
     let repeated = client.try_upgrade_rollback(&admin, &proposal_id);
     assert_failed(repeated);

@@ -34,9 +34,8 @@
 // | `MAX_BACKUP_NAME`  | 32 B   | Short identifier, avoids key-space collision   |
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype,
-    panic_with_error, symbol_short,
-    Address, Bytes, Env, String, Vec,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
+    Bytes, Env, String, Vec,
 };
 
 // ═══════════════════════════════════════════════════════
@@ -68,25 +67,25 @@ pub const MAX_BACKUP_NAME: u32 = 32;
 #[repr(u32)]
 pub enum DataStoreError {
     /// Contract has already been initialised; `init` cannot be called again.
-    AlreadyInitialized      = 1,
+    AlreadyInitialized = 1,
     /// Caller is neither the admin nor a granted writer.
-    NotAuthorized           = 2,
+    NotAuthorized = 2,
     /// Key exceeds `MAX_KEY_LEN` bytes.
-    KeyTooLong              = 3,
+    KeyTooLong = 3,
     /// Value exceeds `MAX_VALUE_LEN` bytes.
-    ValueTooLarge           = 4,
+    ValueTooLarge = 4,
     /// The requested key does not exist in the store.
-    KeyNotFound             = 5,
+    KeyNotFound = 5,
     /// The requested backup snapshot does not exist.
-    BackupNotFound          = 6,
+    BackupNotFound = 6,
     /// Adding another entry would exceed `MAX_ENTRIES`.
-    StoreFull               = 7,
+    StoreFull = 7,
     /// Backup name exceeds `MAX_BACKUP_NAME` bytes.
-    BackupNameTooLong       = 8,
+    BackupNameTooLong = 8,
     /// Contract has not been initialised yet.
-    NotInitialized          = 9,
+    NotInitialized = 9,
     /// New schema version must be strictly greater than the current one.
-    InvalidVersion          = 10,
+    InvalidVersion = 10,
 }
 
 // ═══════════════════════════════════════════════════════
@@ -147,7 +146,9 @@ impl DataStore {
         }
 
         env.storage().persistent().set(&StoreKey::Admin, &admin);
-        env.storage().persistent().set(&StoreKey::SchemaVersion, &0u32);
+        env.storage()
+            .persistent()
+            .set(&StoreKey::SchemaVersion, &0u32);
         env.storage().persistent().set(&StoreKey::EntryCount, &0u32);
 
         // Initialise empty writers set and key index
@@ -155,12 +156,12 @@ impl DataStore {
         env.storage().persistent().set(&StoreKey::Writers, &writers);
 
         let key_index: Vec<String> = Vec::new(&env);
-        env.storage().persistent().set(&StoreKey::KeyIndex, &key_index);
+        env.storage()
+            .persistent()
+            .set(&StoreKey::KeyIndex, &key_index);
 
-        env.events().publish(
-            (symbol_short!("ds_init"), admin.clone()),
-            (),
-        );
+        env.events()
+            .publish((symbol_short!("ds_init"), admin.clone()), ());
     }
 
     // ───────────────────────────────────────────────────
@@ -187,10 +188,8 @@ impl DataStore {
             env.storage().persistent().set(&StoreKey::Writers, &writers);
         }
 
-        env.events().publish(
-            (symbol_short!("writer"), caller, writer),
-            (),
-        );
+        env.events()
+            .publish((symbol_short!("writer"), caller, writer), ());
     }
 
     /// Revoke write access from `writer`.
@@ -213,12 +212,12 @@ impl DataStore {
                 new_writers.push_back(w);
             }
         }
-        env.storage().persistent().set(&StoreKey::Writers, &new_writers);
+        env.storage()
+            .persistent()
+            .set(&StoreKey::Writers, &new_writers);
 
-        env.events().publish(
-            (symbol_short!("writer"), caller, writer),
-            (),
-        );
+        env.events()
+            .publish((symbol_short!("writer"), caller, writer), ());
     }
 
     // ───────────────────────────────────────────────────
@@ -279,7 +278,9 @@ impl DataStore {
                 .get(&StoreKey::KeyIndex)
                 .unwrap_or_else(|| Vec::new(&env));
             key_index.push_back(key.clone());
-            env.storage().persistent().set(&StoreKey::KeyIndex, &key_index);
+            env.storage()
+                .persistent()
+                .set(&StoreKey::KeyIndex, &key_index);
 
             env.storage()
                 .persistent()
@@ -288,10 +289,8 @@ impl DataStore {
 
         env.storage().persistent().set(&store_key, &value);
 
-        env.events().publish(
-            (symbol_short!("ds_save"), caller, key),
-            value.len(),
-        );
+        env.events()
+            .publish((symbol_short!("ds_save"), caller, key), value.len());
     }
 
     // ───────────────────────────────────────────────────
@@ -359,19 +358,24 @@ impl DataStore {
 
         // Store as parallel Vec<String> keys + Vec<Bytes> values
         let mut snap_keys: Vec<String> = Vec::new(&env);
-        let mut snap_vals: Vec<Bytes>  = Vec::new(&env);
+        let mut snap_vals: Vec<Bytes> = Vec::new(&env);
 
         for k in key_index.iter() {
-            if let Some(v) = env.storage().persistent().get::<StoreKey, Bytes>(&StoreKey::Entry(k.clone())) {
+            if let Some(v) = env
+                .storage()
+                .persistent()
+                .get::<StoreKey, Bytes>(&StoreKey::Entry(k.clone()))
+            {
                 snap_keys.push_back(k);
                 snap_vals.push_back(v);
             }
         }
 
         // Pack as (Vec<String>, Vec<Bytes>) tuple stored under one key
-        env.storage()
-            .persistent()
-            .set(&StoreKey::Backup(backup_name.clone()), &(snap_keys, snap_vals));
+        env.storage().persistent().set(
+            &StoreKey::Backup(backup_name.clone()),
+            &(snap_keys, snap_vals),
+        );
 
         env.events().publish(
             (symbol_short!("ds_bkup"), caller, backup_name),
@@ -414,7 +418,7 @@ impl DataStore {
 
         let (snap_keys, snap_vals) = match snapshot {
             Some(s) => s,
-            None    => panic_with_error!(&env, DataStoreError::BackupNotFound),
+            None => panic_with_error!(&env, DataStoreError::BackupNotFound),
         };
 
         // 1. Remove all existing live entries
@@ -435,18 +439,22 @@ impl DataStore {
         for i in 0..snap_len {
             let k = snap_keys.get(i).unwrap();
             let v = snap_vals.get(i).unwrap();
-            env.storage().persistent().set(&StoreKey::Entry(k.clone()), &v);
+            env.storage()
+                .persistent()
+                .set(&StoreKey::Entry(k.clone()), &v);
             new_key_index.push_back(k);
         }
 
         // 3. Update metadata
-        env.storage().persistent().set(&StoreKey::KeyIndex, &new_key_index);
-        env.storage().persistent().set(&StoreKey::EntryCount, &snap_len);
+        env.storage()
+            .persistent()
+            .set(&StoreKey::KeyIndex, &new_key_index);
+        env.storage()
+            .persistent()
+            .set(&StoreKey::EntryCount, &snap_len);
 
-        env.events().publish(
-            (symbol_short!("ds_rest"), caller, backup_name),
-            snap_len,
-        );
+        env.events()
+            .publish((symbol_short!("ds_rest"), caller, backup_name), snap_len);
     }
 
     // ───────────────────────────────────────────────────
@@ -503,10 +511,8 @@ impl DataStore {
             .persistent()
             .set(&StoreKey::SchemaVersion, &new_version);
 
-        env.events().publish(
-            (symbol_short!("ds_migr"), caller, new_version),
-            memo,
-        );
+        env.events()
+            .publish((symbol_short!("ds_migr"), caller, new_version), memo);
     }
 
     // ───────────────────────────────────────────────────

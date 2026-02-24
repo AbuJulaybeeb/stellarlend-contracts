@@ -81,17 +81,24 @@ impl UpgradeManager {
         approvers.push_back(admin.clone());
 
         env.storage().persistent().set(&UpgradeKey::Admin, &admin);
-        env.storage().persistent().set(&UpgradeKey::Approvers, &approvers);
+        env.storage()
+            .persistent()
+            .set(&UpgradeKey::Approvers, &approvers);
         env.storage()
             .persistent()
             .set(&UpgradeKey::RequiredApprovals, &required_approvals);
-        env.storage().persistent().set(&UpgradeKey::NextProposalId, &1u64);
+        env.storage()
+            .persistent()
+            .set(&UpgradeKey::NextProposalId, &1u64);
         env.storage()
             .persistent()
             .set(&UpgradeKey::CurrentWasmHash, &current_wasm_hash);
-        env.storage().persistent().set(&UpgradeKey::CurrentVersion, &0u32);
+        env.storage()
+            .persistent()
+            .set(&UpgradeKey::CurrentVersion, &0u32);
 
-        env.events().publish((symbol_short!("up_init"), admin), required_approvals);
+        env.events()
+            .publish((symbol_short!("up_init"), admin), required_approvals);
     }
 
     /// Adds an upgrade approver. Only admin can call.
@@ -103,7 +110,9 @@ impl UpgradeManager {
         let mut approvers = Self::approvers(&env);
         if !approvers.contains(&approver) {
             approvers.push_back(approver.clone());
-            env.storage().persistent().set(&UpgradeKey::Approvers, &approvers);
+            env.storage()
+                .persistent()
+                .set(&UpgradeKey::Approvers, &approvers);
         }
 
         env.events()
@@ -259,8 +268,10 @@ impl UpgradeManager {
             .persistent()
             .set(&UpgradeKey::Proposal(proposal_id), &proposal);
 
-        env.events()
-            .publish((symbol_short!("up_roll"), caller, proposal_id), prev_version);
+        env.events().publish(
+            (symbol_short!("up_roll"), caller, proposal_id),
+            prev_version,
+        );
     }
 
     /// Returns the status of a proposal.

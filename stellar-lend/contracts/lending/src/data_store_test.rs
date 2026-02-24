@@ -11,12 +11,7 @@
 //   - State invariants (entry count, key index integrity)
 //   - Idempotent operations (overwrite, re-backup, re-grant)
 
-#![cfg(test)]
-
-use soroban_sdk::{
-    testutils::Address as _,
-    Address, Bytes, Env, String
-};
+use soroban_sdk::{testutils::Address as _, Address, Bytes, Env, String};
 
 use crate::data_store::{DataStore, DataStoreClient};
 
@@ -79,7 +74,7 @@ fn string_of_len(env: &Env, n: usize) -> String {
 
 #[test]
 fn test_init_sets_admin() {
-    let (env, client, admin) = setup_init();
+    let (_env, client, admin) = setup_init();
     assert_eq!(client.get_admin(), admin);
 }
 
@@ -98,7 +93,7 @@ fn test_init_entry_count_zero() {
 #[test]
 #[should_panic]
 fn test_init_twice_panics() {
-    let (env, client, admin) = setup_init();
+    let (_env, client, admin) = setup_init();
     client.init(&admin); // second call → AlreadyInitialized
 }
 
@@ -411,7 +406,7 @@ fn test_restore_is_idempotent() {
 
 #[test]
 fn test_migrate_bumps_version() {
-    let (env, client, admin) = setup_init();
+    let (_env, client, admin) = setup_init();
     assert_eq!(client.schema_version(), 0);
     client.data_migrate_bump_version(&admin, &1, &None);
     assert_eq!(client.schema_version(), 1);
@@ -419,7 +414,7 @@ fn test_migrate_bumps_version() {
 
 #[test]
 fn test_migrate_can_skip_versions() {
-    let (env, client, admin) = setup_init();
+    let (_env, client, admin) = setup_init();
     client.data_migrate_bump_version(&admin, &42, &None);
     assert_eq!(client.schema_version(), 42);
 }
@@ -444,14 +439,14 @@ fn test_migrate_with_memo() {
 #[test]
 #[should_panic]
 fn test_migrate_same_version_panics() {
-    let (env, client, admin) = setup_init();
+    let (_env, client, admin) = setup_init();
     client.data_migrate_bump_version(&admin, &0, &None); // same as current
 }
 
 #[test]
 #[should_panic]
 fn test_migrate_lower_version_panics() {
-    let (env, client, admin) = setup_init();
+    let (_env, client, admin) = setup_init();
     client.data_migrate_bump_version(&admin, &5, &None);
     client.data_migrate_bump_version(&admin, &3, &None); // rollback attempt
 }
@@ -459,7 +454,7 @@ fn test_migrate_lower_version_panics() {
 #[test]
 #[should_panic]
 fn test_writer_cannot_migrate() {
-    let (env, client, _, writer) = setup_with_writer();
+    let (_env, client, _, writer) = setup_with_writer();
     client.data_migrate_bump_version(&writer, &1, &None);
 }
 
@@ -485,13 +480,13 @@ fn test_migrate_memo_too_long_panics() {
 
 #[test]
 fn test_grant_writer_allows_write() {
-    let (env, client, admin, writer) = setup_with_writer();
+    let (_env, client, _admin, writer) = setup_with_writer();
     assert!(client.is_writer(&writer));
 }
 
 #[test]
 fn test_revoke_writer_removes_write_access() {
-    let (env, client, admin, writer) = setup_with_writer();
+    let (_env, client, admin, writer) = setup_with_writer();
     client.revoke_writer(&admin, &writer);
     assert!(!client.is_writer(&writer));
 }
@@ -506,7 +501,7 @@ fn test_revoked_writer_cannot_save() {
 
 #[test]
 fn test_grant_writer_idempotent() {
-    let (env, client, admin, writer) = setup_with_writer();
+    let (_env, client, admin, writer) = setup_with_writer();
     client.grant_writer(&admin, &writer); // re-grant
     client.grant_writer(&admin, &writer); // and again
     assert!(client.is_writer(&writer)); // still a writer
@@ -523,7 +518,7 @@ fn test_stranger_cannot_grant_writer() {
 
 #[test]
 fn test_admin_is_always_a_writer() {
-    let (env, client, admin) = setup_init();
+    let (_env, client, admin) = setup_init();
     assert!(client.is_writer(&admin));
 }
 
@@ -545,7 +540,7 @@ fn test_full_lifecycle_save_backup_migrate_restore() {
     // Phase 1: populate store at v0
     client.data_save(&admin, &s(&env, "config.network"), &b(&env, b"mainnet"));
     client.data_save(&admin, &s(&env, "config.timeout"), &b(&env, b"30"));
-    client.data_save(&admin, &s(&env, "config.retry"),   &b(&env, b"3"));
+    client.data_save(&admin, &s(&env, "config.retry"), &b(&env, b"3"));
     assert_eq!(client.entry_count(), 3);
 
     // Phase 2: backup v0 state
@@ -561,7 +556,10 @@ fn test_full_lifecycle_save_backup_migrate_restore() {
     client.data_restore(&admin, &s(&env, "v0_snapshot"));
 
     // Verify restored state
-    assert_eq!(client.data_load(&s(&env, "config.network")), b(&env, b"mainnet"));
+    assert_eq!(
+        client.data_load(&s(&env, "config.network")),
+        b(&env, b"mainnet")
+    );
     assert_eq!(client.data_load(&s(&env, "config.timeout")), b(&env, b"30"));
     assert_eq!(client.entry_count(), 3);
     assert!(!client.key_exists(&s(&env, "config.deadline")));
