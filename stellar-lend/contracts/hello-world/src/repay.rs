@@ -46,6 +46,17 @@ pub enum RepayError {
 }
 
 /// Calculate interest accrued since last accrual time
+///
+/// Uses dynamic interest rate based on current protocol utilization.
+///
+/// # Arguments
+/// * `env` - The Soroban environment
+/// * `principal` - The principal amount to calculate interest on
+/// * `last_accrual_time` - The timestamp of the last interest accrual
+/// * `current_time` - The current ledger timestamp
+///
+/// # Returns
+/// * `Result<i128, RepayError>` - The accrued interest amount or an error
 fn calculate_accrued_interest(
     env: &Env,
     principal: i128,
@@ -68,6 +79,16 @@ fn calculate_accrued_interest(
 }
 
 /// Accrue interest on a position
+///
+/// Updates the position's borrow_interest and last_accrual_time based on elapsed time
+/// and the current interest rate.
+///
+/// # Arguments
+/// * `env` - The Soroban environment
+/// * `position` - A mutable reference to the user's position
+///
+/// # Returns
+/// * `Result<(), RepayError>` - Success or an error
 fn accrue_interest(env: &Env, position: &mut Position) -> Result<(), RepayError> {
     let current_time = env.ledger().timestamp();
     if position.debt == 0 {
@@ -81,7 +102,52 @@ fn accrue_interest(env: &Env, position: &mut Position) -> Result<(), RepayError>
     Ok(())
 }
 
+/// Helper function to get the native asset contract address from storage
+///
+/// # Arguments
+/// * `env` - The Soroban environment
+///
+/// # Returns
+/// * `Result<Address, RepayError>` - The native asset address or an error if not configured
+fn get_native_asset_address(env: &Env) -> Result<Address, RepayError> {
+    env.storage()
+        .persistent()
+        .get::<DepositDataKey, Address>(&DepositDataKey::NativeAssetAddress)
+        .ok_or(RepayError::InvalidAsset)
+}
+
 /// Repay debt function
+///
+/// Allows users to repay their borrowed assets, reducing debt and accrued interest.
+/// Supports both partial and full repayments.
+///
+/// # Arguments
+/// * `env` - The Soroban environment
+/// * `user` - The address of the user repaying debt
+/// * `asset` - The address of the asset contract to repay (None for native XLM)
+/// * `amount` - The amount to repay
+///
+/// # Returns
+/// Returns a tuple (remaining_debt, interest_paid, principal_paid)
+///
+/// # Errors
+/// * `RepayError::InvalidAmount` - If amount is zero or negative
+/// * `RepayError::InvalidAsset` - If asset address is invalid or not configured
+/// * `RepayError::InsufficientBalance` - If user doesn't have enough balance
+/// * `RepayError::RepayPaused` - If repayments are paused
+/// * `RepayError::NoDebt` - If user has no debt to repay
+/// * `RepayError::Overflow` - If calculation overflow occurs
+///
+/// # Security
+/// * Validates repay amount > 0
+/// * Checks pause switches
+/// * Validates sufficient token balance
+/// * Accrues interest before repayment
+/// * Handles partial and full repayments
+/// * Transfers tokens from user to contract
+/// * Updates debt balances
+/// * Emits events for tracking
+/// * Updates analytics
 pub fn repay_debt(
     env: &Env,
     user: Address,
@@ -104,8 +170,17 @@ pub fn repay_debt(
     if let Some(ref asset_addr) = asset {
         if asset_addr == &env.current_contract_address() {
             return Err(RepayError::InvalidAsset);
+    // Determine the asset contract address to use
+    let asset_addr = match &asset {
+        Some(addr) => {
+            // Validate asset address - ensure it's not the contract itself
+            if addr == &env.current_contract_address() {
+                return Err(RepayError::InvalidAsset);
+            }
+            addr.clone()
         }
-    }
+        None => get_native_asset_address(env)?,
+    };
 
     let reserve_factor = if let Some(asset_addr) = asset.as_ref() {
         let params_key = DepositDataKey::AssetParams(asset_addr.clone());
@@ -144,6 +219,44 @@ pub fn repay_debt(
 
     let interest_paid = if repay_amount <= position.borrow_interest { repay_amount } else { position.borrow_interest };
     let principal_paid = repay_amount.checked_sub(interest_paid).ok_or(RepayError::Overflow)?;
+    // Handle asset transfer - user pays the contract
+    // We use the determined asset_addr (either token or native)
+    let token_client = soroban_sdk::token::Client::new(env, &asset_addr);
+
+    // Check user balance
+    let user_balance = token_client.balance(&user);
+    if user_balance < repay_amount {
+        return Err(RepayError::InsufficientBalance);
+    }
+
+    // Transfer tokens from user to contract
+    // The user must have approved the contract to spend their tokens
+    token_client.transfer_from(
+        &env.current_contract_address(), // spender (this contract)
+        &user,                           // from (user)
+        &env.current_contract_address(), // to (this contract)
+        &repay_amount,
+    );
+
+    // Calculate interest and principal portions
+    // Interest is paid first, then principal
+    let interest_paid = if repay_amount <= position.borrow_interest {
+        repay_amount
+    } else {
+        position.borrow_interest
+    };
+
+    let principal_paid = repay_amount
+        .checked_sub(interest_paid)
+        .ok_or(RepayError::Overflow)?;
+
+    // Update position
+    position.borrow_interest = position
+        .borrow_interest
+        .checked_sub(interest_paid)
+        .unwrap_or(0); // Should not underflow, but handle gracefully
+
+    position.debt = position.debt.checked_sub(principal_paid).unwrap_or(0); // Should not underflow, but handle gracefully
 
     position.borrow_interest = position.borrow_interest.checked_sub(interest_paid).unwrap_or(0);
     position.debt = position.debt.checked_sub(principal_paid).unwrap_or(0);
@@ -200,6 +313,22 @@ pub fn repay_debt(
 }
 
 fn update_user_analytics_repay(env: &Env, user: &Address, amount: i128, timestamp: u64) -> Result<(), RepayError> {
+/// Update user analytics after repayment
+///
+/// # Arguments
+/// * `env` - The Soroban environment
+/// * `user` - The address of the user
+/// * `amount` - The repayment amount
+/// * `timestamp` - The current ledger timestamp
+///
+/// # Returns
+/// * `Result<(), RepayError>` - Success or an error
+fn update_user_analytics_repay(
+    env: &Env,
+    user: &Address,
+    amount: i128,
+    timestamp: u64,
+) -> Result<(), RepayError> {
     let analytics_key = DepositDataKey::UserAnalytics(user.clone());
     let mut analytics = env.storage().persistent().get::<DepositDataKey, UserAnalytics>(&analytics_key)
         .unwrap_or_else(|| UserAnalytics {
@@ -230,6 +359,29 @@ fn update_protocol_analytics_repay(env: &Env, amount: i128) -> Result<(), RepayE
     let analytics_key = DepositDataKey::ProtocolAnalytics;
     let mut analytics = env.storage().persistent().get::<DepositDataKey, ProtocolAnalytics>(&analytics_key)
         .unwrap_or(ProtocolAnalytics { total_deposits: 0, total_borrows: 0, total_value_locked: 0 });
+/// Update protocol analytics after repayment
+///
+/// # Arguments
+/// * `env` - The Soroban environment
+/// * `amount` - The repayment amount
+///
+/// # Returns
+/// * `Result<(), RepayError>` - Success or an error
+fn update_protocol_analytics_repay(env: &Env, amount: i128) -> Result<(), RepayError> {
+    let analytics_key = DepositDataKey::ProtocolAnalytics;
+    let mut analytics = env
+        .storage()
+        .persistent()
+        .get::<DepositDataKey, ProtocolAnalytics>(&analytics_key)
+        .unwrap_or(ProtocolAnalytics {
+            total_deposits: 0,
+            total_borrows: 0,
+            total_value_locked: 0,
+        });
+
+    // Update total borrows (decrease by repayment amount)
+    analytics.total_borrows = analytics.total_borrows.checked_sub(amount).unwrap_or(0); // If it underflows, set to 0 (graceful recovery)
+
     env.storage().persistent().set(&analytics_key, &analytics);
     Ok(())
 }

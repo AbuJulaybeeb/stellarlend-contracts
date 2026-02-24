@@ -39,13 +39,11 @@ fn get_user_position(env: &Env, contract_id: &Address, user: &Address) -> Option
 /// Asserts final balances, position, and that user can withdraw after repay.
 #[test]
 fn integration_full_flow_deposit_borrow_repay_withdraw() {
-    let env = create_test_env();
-    let contract_id = env.register(HelloContract, ());
-    let client = HelloContractClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-
-    client.initialize(&admin);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &5_000);
+    token_client.approve(&user, &contract_id, &5_000, &(env.ledger().sequence() + 100));
 
     let deposit_amount = 10_000;
     client.deposit_collateral(&user, &None, &deposit_amount);

@@ -282,5 +282,9 @@ impl AmmContract {
     }
 }
 
+// Liquidation integration tests require lending crate; enable with feature "liquidate_integration"
+// when lending is available as a dependency.
+#[cfg(all(test, feature = "liquidate_integration"))]
+mod liquidate_test;
 #[cfg(test)]
 mod test;

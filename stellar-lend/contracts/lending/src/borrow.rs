@@ -57,6 +57,10 @@ pub enum BorrowDataKey {
     BorrowCollateralRatio,
     /// Minimum borrow amount
     BorrowMinAmount,
+    /// Oracle contract address for price feeds (optional)
+    OracleAddress,
+    /// Liquidation threshold in basis points (e.g. 8000 = 80%)
+    LiquidationThresholdBps,
 }
 
 /// User debt position tracking.
@@ -307,4 +311,52 @@ pub fn get_admin(env: &Env) -> Option<Address> {
     env.storage()
         .persistent()
         .get(&BorrowDataKey::ProtocolAdmin)
+}
+
+/// Returns the oracle address if configured. Used by views for collateral/debt valuation.
+pub fn get_oracle(env: &Env) -> Option<Address> {
+    env.storage()
+        .persistent()
+        .get(&BorrowDataKey::OracleAddress)
+}
+
+/// Returns liquidation threshold in basis points (e.g. 8000 = 80%). Default 8000 if not set.
+pub fn get_liquidation_threshold_bps(env: &Env) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&BorrowDataKey::LiquidationThresholdBps)
+        .unwrap_or(8000)
+}
+
+/// Set oracle address for price feeds (admin only). Caller must be admin and authorize.
+pub fn set_oracle(env: &Env, admin: &Address, oracle: Address) -> Result<(), BorrowError> {
+    let current = get_admin(env).ok_or(BorrowError::Unauthorized)?;
+    if *admin != current {
+        return Err(BorrowError::Unauthorized);
+    }
+    admin.require_auth();
+    env.storage()
+        .persistent()
+        .set(&BorrowDataKey::OracleAddress, &oracle);
+    Ok(())
+}
+
+/// Set liquidation threshold in basis points (admin only). E.g. 8000 = 80%.
+pub fn set_liquidation_threshold_bps(
+    env: &Env,
+    admin: &Address,
+    bps: i128,
+) -> Result<(), BorrowError> {
+    let current = get_admin(env).ok_or(BorrowError::Unauthorized)?;
+    if *admin != current {
+        return Err(BorrowError::Unauthorized);
+    }
+    admin.require_auth();
+    if bps <= 0 || bps > 10000 {
+        return Err(BorrowError::InvalidAmount);
+    }
+    env.storage()
+        .persistent()
+        .set(&BorrowDataKey::LiquidationThresholdBps, &bps);
+    Ok(())
 }

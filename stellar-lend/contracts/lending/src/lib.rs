@@ -7,7 +7,7 @@ mod pause;
 
 use borrow::{
     borrow, get_admin, get_user_collateral, get_user_debt, initialize_borrow_settings, set_admin,
-    BorrowCollateral, BorrowError, DebtPosition,
+    set_liquidation_threshold_bps, set_oracle, BorrowCollateral, BorrowError, DebtPosition,
 };
 use pause::{is_paused, set_pause, PauseType};
 
@@ -19,6 +19,12 @@ use deposit::{
 
 mod flash_loan;
 use flash_loan::{flash_loan, set_flash_loan_fee_bps, FlashLoanError};
+
+mod views;
+use views::{
+    get_collateral_balance, get_collateral_value, get_debt_balance, get_debt_value,
+    get_health_factor, get_user_position, UserPositionSummary,
+};
 
 mod withdraw;
 use withdraw::{initialize_withdraw_settings, set_withdraw_paused, WithdrawError};
@@ -33,6 +39,9 @@ mod deposit_test;
 
 #[cfg(test)]
 mod flash_loan_test;
+
+#[cfg(test)]
+mod views_test;
 
 #[cfg(test)]
 mod withdraw_test;
@@ -132,6 +141,54 @@ impl LendingContract {
     /// Get user's collateral position
     pub fn get_user_collateral(env: Env, user: Address) -> BorrowCollateral {
         get_user_collateral(&env, &user)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // View functions (read-only; for frontends and liquidations)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// Returns the user's collateral balance (raw amount).
+    pub fn get_collateral_balance(env: Env, user: Address) -> i128 {
+        get_collateral_balance(&env, &user)
+    }
+
+    /// Returns the user's debt balance (principal + accrued interest).
+    pub fn get_debt_balance(env: Env, user: Address) -> i128 {
+        get_debt_balance(&env, &user)
+    }
+
+    /// Returns the user's collateral value in common unit (e.g. USD 8 decimals). 0 if oracle not set.
+    pub fn get_collateral_value(env: Env, user: Address) -> i128 {
+        get_collateral_value(&env, &user)
+    }
+
+    /// Returns the user's debt value in common unit. 0 if oracle not set.
+    pub fn get_debt_value(env: Env, user: Address) -> i128 {
+        get_debt_value(&env, &user)
+    }
+
+    /// Returns health factor (scaled 10000 = 1.0). Above 10000 = healthy; below = liquidatable.
+    pub fn get_health_factor(env: Env, user: Address) -> i128 {
+        get_health_factor(&env, &user)
+    }
+
+    /// Returns full position summary: collateral/debt balances and values, and health factor.
+    pub fn get_user_position(env: Env, user: Address) -> UserPositionSummary {
+        get_user_position(&env, &user)
+    }
+
+    /// Set oracle address for price feeds (admin only).
+    pub fn set_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), BorrowError> {
+        set_oracle(&env, &admin, oracle)
+    }
+
+    /// Set liquidation threshold in basis points, e.g. 8000 = 80% (admin only).
+    pub fn set_liquidation_threshold_bps(
+        env: Env,
+        admin: Address,
+        bps: i128,
+    ) -> Result<(), BorrowError> {
+        set_liquidation_threshold_bps(&env, &admin, bps)
     }
 
     /// Deposit collateral into the protocol

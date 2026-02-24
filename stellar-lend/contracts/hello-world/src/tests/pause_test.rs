@@ -24,7 +24,7 @@
 //!   the state always reflects the last write.
 
 use crate::{HelloContract, HelloContractClient};
-use soroban_sdk::{testutils::Address as _, Address, Env, Map, Symbol};
+use soroban_sdk::{testutils::Address as _, testutils::Ledger, Address, Env, Map, Symbol};
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -229,8 +229,13 @@ fn test_pause_repay_blocks_repay() {
 #[test]
 fn test_unpause_repay_allows_repay() {
     let e = env();
-    let (_id, admin, client) = setup(&e);
+    let (id, admin, client) = setup(&e);
+    let native_asset = e.register_stellar_asset_contract(admin.clone());
+    client.set_native_asset_address(&admin, &native_asset);
     let user = Address::generate(&e);
+    let token = soroban_sdk::token::StellarAssetClient::new(&e, &native_asset);
+    token.mint(&user, &1000);
+    token.approve(&user, &id, &1000, &(e.ledger().sequence() + 100));
 
     client.deposit_collateral(&user, &None, &10_000_i128);
     client.borrow_asset(&user, &None, &1_000_i128);
@@ -304,8 +309,13 @@ fn test_emergency_pause_does_not_block_borrow() {
 #[test]
 fn test_emergency_pause_does_not_block_repay() {
     let e = env();
-    let (_id, admin, client) = setup(&e);
+    let (id, admin, client) = setup(&e);
+    let native_asset = e.register_stellar_asset_contract(admin.clone());
+    client.set_native_asset_address(&admin, &native_asset);
     let user = Address::generate(&e);
+    let token = soroban_sdk::token::StellarAssetClient::new(&e, &native_asset);
+    token.mint(&user, &1000);
+    token.approve(&user, &id, &1000, &(e.ledger().sequence() + 100));
 
     client.deposit_collateral(&user, &None, &10_000_i128);
     client.borrow_asset(&user, &None, &1_000_i128);
@@ -418,8 +428,13 @@ fn test_lift_emergency_pause_restores_risk_param_changes() {
 #[test]
 fn test_pause_deposit_does_not_affect_other_operations() {
     let e = env();
-    let (_id, admin, client) = setup(&e);
+    let (id, admin, client) = setup(&e);
+    let native_asset = e.register_stellar_asset_contract(admin.clone());
+    client.set_native_asset_address(&admin, &native_asset);
     let user = Address::generate(&e);
+    let token = soroban_sdk::token::StellarAssetClient::new(&e, &native_asset);
+    token.mint(&user, &1100);
+    token.approve(&user, &id, &1100, &(e.ledger().sequence() + 100));
 
     // Set up prior state while deposit is unpaused.
     client.deposit_collateral(&user, &None, &10_000_i128);
@@ -444,8 +459,13 @@ fn test_pause_deposit_does_not_affect_other_operations() {
 #[test]
 fn test_pause_borrow_does_not_affect_other_operations() {
     let e = env();
-    let (_id, admin, client) = setup(&e);
+    let (id, admin, client) = setup(&e);
+    let native_asset = e.register_stellar_asset_contract(admin.clone());
+    client.set_native_asset_address(&admin, &native_asset);
     let user = Address::generate(&e);
+    let token = soroban_sdk::token::StellarAssetClient::new(&e, &native_asset);
+    token.mint(&user, &2100);
+    token.approve(&user, &id, &2100, &(e.ledger().sequence() + 100));
 
     client.deposit_collateral(&user, &None, &10_000_i128);
     client.borrow_asset(&user, &None, &1_000_i128);

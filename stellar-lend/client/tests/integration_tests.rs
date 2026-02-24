@@ -343,7 +343,18 @@ async fn test_error_handling_and_retries() {
         .mount(&mock_server)
         .await;
 
-    let config = create_test_config(mock_server.uri(), "http://soroban.test".to_string());
+    // Need at least 2 retries: 1st attempt 503, 2nd 503, 3rd 200
+    let config = Arc::new(
+        BlockchainConfig::custom(
+            mock_server.uri(),
+            "http://soroban.test".to_string(),
+            "Test SDF Network".to_string(),
+        )
+        .unwrap()
+        .with_request_timeout(Duration::from_secs(5))
+        .with_max_retries(2)
+        .with_tx_config(100, 5),
+    );
     let client = BlockchainClient::new(config).unwrap();
 
     // Should succeed after retries
