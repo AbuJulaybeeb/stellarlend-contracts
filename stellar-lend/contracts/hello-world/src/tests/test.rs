@@ -520,11 +520,12 @@ fn test_initialize_risk_management() {
     // Verify default risk config
     let config = client.get_risk_config();
     assert!(config.is_some());
-    let config = config.unwrap();
-    assert_eq!(config.min_collateral_ratio, 11_000); // 110%
-    assert_eq!(config.liquidation_threshold, 10_500); // 105%
-    assert_eq!(config.close_factor, 5_000); // 50%
-    assert_eq!(config.liquidation_incentive, 1_000); // 10%
+
+    // Verify default risk parameters via new getters
+    assert_eq!(client.get_min_collateral_ratio(), 11_000); // 110%
+    assert_eq!(client.get_liquidation_threshold(), 10_500); // 105%
+    assert_eq!(client.get_close_factor(), 5_000); // 50%
+    assert_eq!(client.get_liquidation_incentive(), 1_000); // 10%
 
     // Verify pause switches are initialized
     let pause_deposit = Symbol::new(&env, "pause_deposit");

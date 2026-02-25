@@ -31,9 +31,11 @@ use crate::deposit::{
 };
 use crate::oracle::get_price;
 use crate::risk_management::{
+    is_emergency_paused, is_operation_paused, require_operation_not_paused, RiskManagementError,
+};
+use crate::risk_params::{
     can_be_liquidated, get_close_factor, get_liquidation_incentive,
-    get_liquidation_incentive_amount, get_max_liquidatable_amount, is_emergency_paused,
-    is_operation_paused, require_operation_not_paused, RiskManagementError,
+    get_liquidation_incentive_amount, get_max_liquidatable_amount,
 };
 
 /// Errors that can occur during liquidation operations

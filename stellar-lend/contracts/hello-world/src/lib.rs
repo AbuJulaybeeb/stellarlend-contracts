@@ -66,8 +66,7 @@ mod errors;
 mod events;
 mod repay;
 mod risk_management;
-mod storage;
-mod types;
+mod risk_params;
 mod withdraw;
 
 use borrow::borrow_asset;
@@ -75,11 +74,15 @@ use deposit::deposit_collateral;
 use repay::repay_debt;
 
 use risk_management::{
-    can_be_liquidated, get_close_factor, get_liquidation_incentive,
-    get_liquidation_incentive_amount, get_liquidation_threshold, get_max_liquidatable_amount,
-    get_min_collateral_ratio, initialize_risk_management, is_emergency_paused, is_operation_paused,
-    require_min_collateral_ratio, set_emergency_pause, set_pause_switch, set_pause_switches,
-    set_risk_params, RiskConfig, RiskManagementError,
+    initialize_risk_management, is_emergency_paused, is_operation_paused,
+    set_pause_switch, set_pause_switches, check_emergency_pause, require_admin,
+    RiskConfig, RiskManagementError,
+};
+use risk_params::{
+    can_be_liquidated,
+    get_liquidation_incentive_amount, get_max_liquidatable_amount,
+    initialize_risk_params, require_min_collateral_ratio,
+    RiskParamsError
 };
 use withdraw::withdraw_collateral;
 
@@ -92,9 +95,8 @@ use analytics::{
 
 mod cross_asset;
 use cross_asset::{
-    cross_asset_borrow, cross_asset_deposit, cross_asset_repay, cross_asset_withdraw,
     get_asset_config_by_address, get_asset_list, get_user_asset_position,
-    get_user_position_summary, initialize, initialize_asset, update_asset_config,
+    get_user_position_summary, initialize_asset, update_asset_config,
     update_asset_price, AssetConfig, AssetKey, AssetPosition, CrossAssetError, UserPositionSummary,
 };
 
@@ -200,7 +202,9 @@ impl HelloContract {
         crate::admin::set_admin(&env, admin.clone(), None)
             .map_err(|_| RiskManagementError::Unauthorized)?;
         initialize_risk_management(&env, admin.clone())?;
-        initialize_interest_rate_config(&env, admin).map_err(|e| {
+        initialize_risk_params(&env).map_err(|_| RiskManagementError::InvalidParameter)?;
+        // Initialize interest rate config with default parameters
+        initialize_interest_rate_config(&env, admin.clone()).map_err(|e| {
             if e == InterestRateError::AlreadyInitialized {
                 RiskManagementError::AlreadyInitialized
             } else {
@@ -297,11 +301,28 @@ impl HelloContract {
     /// Returns Ok(()) on success
     pub fn set_risk_params(
         env: Env,
-        user: Address,
-        asset: Option<Address>,
-        amount: i128,
-    ) -> Result<i128, crate::withdraw::WithdrawError> {
-        withdraw::withdraw_collateral(&env, user, asset, amount)
+        caller: Address,
+        min_collateral_ratio: Option<i128>,
+        liquidation_threshold: Option<i128>,
+        close_factor: Option<i128>,
+        liquidation_incentive: Option<i128>,
+    ) -> Result<(), RiskManagementError> {
+        require_admin(&env, &caller)?;
+        check_emergency_pause(&env)?;
+        risk_params::set_risk_params(
+            &env,
+            min_collateral_ratio,
+            liquidation_threshold,
+            close_factor,
+            liquidation_incentive,
+        ).map_err(|e| match e {
+            RiskParamsError::ParameterChangeTooLarge => RiskManagementError::ParameterChangeTooLarge,
+            RiskParamsError::InvalidCollateralRatio => RiskManagementError::InvalidCollateralRatio,
+            RiskParamsError::InvalidLiquidationThreshold => RiskManagementError::InvalidLiquidationThreshold,
+            RiskParamsError::InvalidCloseFactor => RiskManagementError::InvalidCloseFactor,
+            RiskParamsError::InvalidLiquidationIncentive => RiskManagementError::InvalidLiquidationIncentive,
+            _ => RiskManagementError::InvalidParameter,
+        })
     }
 
     /// Borrow assets from the protocol
@@ -327,41 +348,50 @@ impl HelloContract {
     /// Liquidate an undercollateralized position
     pub fn liquidate(
         env: Env,
-        liquidator: Address,
-        borrower: Address,
-        debt_asset: Option<Address>,
-        collateral_asset: Option<Address>,
-        debt_amount: i128,
-    ) -> (i128, i128, i128) {
-        liquidate::liquidate(&env, liquidator, borrower, debt_asset, collateral_asset, debt_amount)
-            .expect("Liquidation error")
+        caller: Address,
+        paused: bool,
+    ) -> Result<(), RiskManagementError> {
+        risk_management::set_emergency_pause(&env, caller, paused)
     }
 
-    /// Update asset parameters (admin only)
-    pub fn update_asset_params(
-        env: Env,
-        admin: Address,
-        asset: Address,
-        params: AssetParams,
-    ) -> Result<(), RiskManagementError> {
-        require_admin(&env, &admin)?;
-
-        let asset_params_key = DepositDataKey::AssetParams(asset);
-        env.storage().persistent().set(&asset_params_key, &params);
-        Ok(())
+    /// Get current risk configuration
+    ///
+    /// # Returns
+    /// Returns the current risk configuration or None if not initialized
+    pub fn get_risk_config(env: Env) -> Option<RiskConfig> {
+        risk_management::get_risk_config(&env)
     }
 
-    /// Update pause switches (admin only)
-    pub fn update_pause_switches(
-        env: Env,
-        admin: Address,
-        switches: Map<Symbol, bool>,
-    ) -> Result<(), RiskManagementError> {
-        require_admin(&env, &admin)?;
+    /// Get minimum collateral ratio
+    ///
+    /// # Returns
+    /// Returns the minimum collateral ratio in basis points
+    pub fn get_min_collateral_ratio(env: Env) -> Result<i128, RiskManagementError> {
+        risk_params::get_min_collateral_ratio(&env).map_err(|_| RiskManagementError::InvalidParameter)
+    }
 
-        let pause_switches_key = DepositDataKey::PauseSwitches;
-        env.storage().persistent().set(&pause_switches_key, &switches);
-        Ok(())
+    /// Get liquidation threshold
+    ///
+    /// # Returns
+    /// Returns the liquidation threshold in basis points
+    pub fn get_liquidation_threshold(env: Env) -> Result<i128, RiskManagementError> {
+        risk_params::get_liquidation_threshold(&env).map_err(|_| RiskManagementError::InvalidParameter)
+    }
+
+    /// Get close factor
+    ///
+    /// # Returns
+    /// Returns the close factor in basis points
+    pub fn get_close_factor(env: Env) -> Result<i128, RiskManagementError> {
+        risk_params::get_close_factor(&env).map_err(|_| RiskManagementError::InvalidParameter)
+    }
+
+    /// Get liquidation incentive
+    ///
+    /// # Returns
+    /// Returns the liquidation incentive in basis points
+    pub fn get_liquidation_incentive(env: Env) -> Result<i128, RiskManagementError> {
+        risk_params::get_liquidation_incentive(&env).map_err(|_| RiskManagementError::InvalidParameter)
     }
 
     /// Get current borrow rate (in basis points)
@@ -387,37 +417,45 @@ impl HelloContract {
         rate_ceiling: Option<i128>,
         spread: Option<i128>,
     ) -> Result<(), RiskManagementError> {
-        require_admin(&env, &admin)?;
+        require_min_collateral_ratio(&env, collateral_value, debt_value).map_err(|_| RiskManagementError::InsufficientCollateralRatio)
+    }
 
-        interest_rate::update_interest_rate_config(
-            &env,
-            admin,
-            base_rate,
-            kink,
-            multiplier,
-            jump_multiplier,
-            rate_floor,
-            rate_ceiling,
-            spread,
-        )
-        .map_err(|_| RiskManagementError::InvalidParameter)
+    /// Check if position can be liquidated
+    ///
+    /// # Arguments
+    /// * `collateral_value` - Total collateral value (in base units)
+    /// * `debt_value` - Total debt value (in base units)
+    ///
+    /// # Returns
+    /// Returns true if position can be liquidated
+    pub fn can_be_liquidated(
+        env: Env,
+        collateral_value: i128,
+        debt_value: i128,
+    ) -> Result<bool, RiskManagementError> {
+        can_be_liquidated(&env, collateral_value, debt_value).map_err(|_| RiskManagementError::InvalidParameter)
     }
 
     /// Manual emergency interest rate adjustment (admin only)
     pub fn set_emergency_rate_adjustment(
         env: Env,
-        admin: Address,
-        adjustment_bps: i128,
-    ) -> Result<(), RiskManagementError> {
-        require_admin(&env, &admin)?;
-
-        interest_rate::set_emergency_rate_adjustment(&env, admin, adjustment_bps)
-            .map_err(|_| RiskManagementError::InvalidParameter)
+        debt_value: i128,
+    ) -> Result<i128, RiskManagementError> {
+        get_max_liquidatable_amount(&env, debt_value).map_err(|_| RiskManagementError::Overflow)
     }
 
-    /// Get protocol utilization (in basis points)
-    pub fn get_utilization(env: Env) -> i128 {
-        interest_rate::calculate_utilization(&env).unwrap_or(0)
+    /// Calculate liquidation incentive amount
+    ///
+    /// # Arguments
+    /// * `liquidated_amount` - Amount being liquidated (in base units)
+    ///
+    /// # Returns
+    /// Liquidation incentive amount
+    pub fn get_liquidation_incentive_amount(
+        env: Env,
+        liquidated_amount: i128,
+    ) -> Result<i128, RiskManagementError> {
+        get_liquidation_incentive_amount(&env, liquidated_amount).map_err(|_| RiskManagementError::Overflow)
     }
 
     /// Refresh analytics for a user
@@ -667,40 +705,80 @@ impl HelloContract {
         amm_swap(env, user, params)
     }
 
-    /// Add liquidity to AMM pool
-    pub fn amm_add_liquidity(
+    /// Register a bridge 
+    ///
+    /// # Arguments
+    /// * `caller` - Admin address for authorization
+    /// * `network_id` - ID of the remote network
+    /// * `bridge` - Address of the bridge contract
+    /// * `fee_bps` - Fee in basis points
+    pub fn register_bridge(
         env: Env,
-        user: Address,
-        params: LiquidityParams,
-    ) -> Result<i128, AmmError> {
-        amm_add_liquidity(env, user, params)
+        caller: Address,
+        network_id: u32,
+        bridge: Address,
+        fee_bps: i128,
+    ) -> Result<(), BridgeError> {
+        bridge::register_bridge(&env, caller, network_id, bridge, fee_bps)
     }
 
-    /// Remove liquidity from AMM pool
-    #[allow(clippy::too_many_arguments)]
-    pub fn amm_remove_liquidity(
+    /// Set bridge fee
+    /// 
+    /// # Arguments
+    /// * `caller` - Admin address for authorization
+    /// * `network_id` - ID of the remote network
+    /// * `fee_bps` - New fee in basis points
+    pub fn set_bridge_fee(
+        env: Env,
+        caller: Address,
+        network_id: u32,
+        fee_bps: i128,
+    ) -> Result<(), BridgeError> {
+        bridge::set_bridge_fee(&env, caller, network_id, fee_bps)
+    }
+
+    /// Deposit through a bridge
+    ///
+    /// # Arguments
+    /// * `user` - User depositing collateral
+    /// * `network_id` - Remote network ID
+    /// * `asset` - Asset to deposit
+    /// * `amount` - Amount to deposit
+    pub fn bridge_deposit(
         env: Env,
         user: Address,
-        protocol: Address,
-        token_a: Option<Address>,
-        token_b: Option<Address>,
-        lp_tokens: i128,
-        min_amount_a: i128,
-        min_amount_b: i128,
-        deadline: u64,
-    ) -> Result<(i128, i128), AmmError> {
-        amm_remove_liquidity(
-            env,
-            user,
-            protocol,
-            token_a,
-            token_b,
-            lp_tokens,
-            min_amount_a,
-            min_amount_b,
-            deadline,
-        )
+        network_id: u32,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<i128, BridgeError> {
+        bridge::bridge_deposit(&env, user, network_id, asset, amount)
     }
+
+    /// Withdraw through a bridge
+    ///
+    /// # Arguments
+    /// * `user` - User withdrawing collateral
+    /// * `network_id` - Remote network ID
+    /// * `asset` - Asset to withdraw
+    /// * `amount` - Amount to withdraw
+    pub fn bridge_withdraw(
+        env: Env,
+        user: Address,
+        network_id: u32,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<i128, BridgeError> {
+        bridge::bridge_withdraw(&env, user, network_id, asset, amount)
+    }
+
+    /// List all bridges
+    pub fn list_bridges(env: Env) -> Map<u32, BridgeConfig> {
+        bridge::list_bridges(&env)
+    }
+
+    /// Get configuration of a specific bridge
+    pub fn get_bridge_config(env: Env, network_id: u32) -> Result<BridgeConfig, BridgeError> {
+        bridge::get_bridge_config(&env, network_id)
     /// Set a configuration value (admin only)
     ///
     /// # Arguments
@@ -1255,9 +1333,9 @@ impl HelloContract {
     /// Returns Ok(()) on success
     pub fn gov_execute_recovery(
         env: Env,
-        executor: Address,
-    ) -> Result<(), errors::GovernanceError> {
-        governance::execute_recovery(&env, executor)
+        user: Address,
+    ) -> Result<UserPositionSummary, CrossAssetError> {
+        get_user_position_summary(&env, &user)
     }
 
     // ============================================================================

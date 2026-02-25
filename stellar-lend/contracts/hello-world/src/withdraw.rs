@@ -30,9 +30,8 @@ pub enum WithdrawError {
     Undercollateralized = 8,
 }
 
-/// Minimum collateral ratio (in basis points, e.g., 15000 = 150%)
-/// This is the minimum ratio required: collateral_value / debt_value >= 1.5
-const MIN_COLLATERAL_RATIO_BPS: i128 = 15000; // 150%
+// Minimum collateral ratio is now managed by the risk_params module
+// const MIN_COLLATERAL_RATIO_BPS: i128 = 15000; // 150% (Legacy)
 
 /// Calculate collateral ratio
 /// Returns (collateral_value * collateral_factor) / (debt + interest)
@@ -120,7 +119,8 @@ fn validate_collateral_ratio_after_withdraw(
         position.borrow_interest,
         collateral_factor,
     ) {
-        if new_ratio < MIN_COLLATERAL_RATIO_BPS {
+        let min_ratio = crate::risk_params::get_min_collateral_ratio(env).unwrap_or(15000);
+        if new_ratio < min_ratio {
             return Err(WithdrawError::InsufficientCollateralRatio);
         }
     } else {

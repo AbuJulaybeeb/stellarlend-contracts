@@ -54,7 +54,8 @@ pub enum BorrowError {
 
 /// Minimum collateral ratio (in basis points, e.g., 15000 = 150%)
 /// This is the minimum ratio required: collateral_value / debt_value >= 1.5
-const MIN_COLLATERAL_RATIO_BPS: i128 = 15000; // 150%
+// Minimum collateral ratio is now managed by the risk_params module
+// const MIN_COLLATERAL_RATIO_BPS: i128 = 15000; // 150% (Legacy)
 
 /// Annual interest rate in basis points (e.g., 500 = 5% per year)
 /// This is a simple constant rate model - in production, this would be more sophisticated
@@ -149,6 +150,7 @@ fn calculate_max_borrowable(
     current_debt: i128,
     current_interest: i128,
     collateral_factor: i128,
+    min_collateral_ratio: i128,
 ) -> Result<i128, BorrowError> {
     // Calculate collateral value
     let collateral_value = collateral
@@ -167,7 +169,7 @@ fn calculate_max_borrowable(
     let max_debt = collateral_value
         .checked_mul(10000)
         .ok_or(BorrowError::Overflow)?
-        .checked_div(MIN_COLLATERAL_RATIO_BPS)
+        .checked_div(min_collateral_ratio)
         .ok_or(BorrowError::Overflow)?;
 
     // Maximum borrowable = max_debt - current_total_debt
@@ -220,7 +222,8 @@ fn validate_collateral_ratio_after_borrow(
         position.borrow_interest,
         collateral_factor,
     ) {
-        if new_ratio < MIN_COLLATERAL_RATIO_BPS {
+        let min_ratio = crate::risk_params::get_min_collateral_ratio(env).unwrap_or(15000);
+        if new_ratio < min_ratio {
             return Err(BorrowError::InsufficientCollateralRatio);
         }
     } else {
@@ -343,12 +346,16 @@ pub fn borrow_asset(
         0
     };
 
+    // Get minimum collateral ratio from risk params
+    let min_ratio = crate::risk_params::get_min_collateral_ratio(env).unwrap_or(15000);
+
     // Calculate maximum borrowable amount
     let max_borrowable = calculate_max_borrowable(
         current_collateral,
         position.debt,
         position.borrow_interest,
         collateral_factor,
+        min_ratio,
     )?;
 
     // Check if borrow amount exceeds maximum
