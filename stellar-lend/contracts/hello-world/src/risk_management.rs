@@ -61,13 +61,17 @@ pub enum RiskManagementError {
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum RiskDataKey {
-    /// Risk configuration parameters
+    /// Global risk configuration parameters (MCR, liquidation threshold, etc.)
+    /// Value type: RiskConfig
     RiskConfig,
-    /// Admin address
+    /// Protocol admin address authorized for risk management
+    /// Value type: Address
     Admin,
-    /// Emergency pause flag
+    /// Global emergency pause flag. If true, all protocol operations are halted.
+    /// Value type: bool
     EmergencyPause,
-    /// Parameter change timelock (for safety)
+    /// Timelock for safety of sensitive parameter changes
+    /// Value type: u64 (timestamp)
     ParameterChangeTimelock,
 }
 
@@ -116,10 +120,10 @@ pub enum PauseOperation {
 /// # Errors
 /// * `RiskManagementError::InvalidParameter` - If default parameters are invalid
 pub fn initialize_risk_management(env: &Env, admin: Address) -> Result<(), RiskManagementError> {
-    // Guard against double initialization – admin key must not exist yet.
-    let admin_key = RiskDataKey::Admin;
-    if env.storage().persistent().has::<RiskDataKey>(&admin_key) {
-        return Err(RiskManagementError::AlreadyInitialized);
+    // Check if initialized
+    let config_key = RiskDataKey::RiskConfig;
+    if env.storage().persistent().has(&config_key) {
+        return Ok(());
     }
 
     // Set admin
@@ -161,21 +165,15 @@ fn create_default_pause_switches(env: &Env) -> Map<Symbol, bool> {
     switches
 }
 
-/// Get the admin address
+/// Get the admin address (deprecated, delegates to new admin module)
+#[deprecated(note = "Use crate::admin::get_admin instead")]
 pub fn get_admin(env: &Env) -> Option<Address> {
-    let admin_key = RiskDataKey::Admin;
-    env.storage()
-        .persistent()
-        .get::<RiskDataKey, Address>(&admin_key)
+    crate::admin::get_admin(env)
 }
 
-/// Check if caller is admin
+/// Check if caller is admin (delegates to new admin module)
 pub fn require_admin(env: &Env, caller: &Address) -> Result<(), RiskManagementError> {
-    let admin = get_admin(env).ok_or(RiskManagementError::Unauthorized)?;
-    if admin != *caller {
-        return Err(RiskManagementError::Unauthorized);
-    }
-    Ok(())
+    crate::admin::require_admin(env, caller).map_err(|_| RiskManagementError::Unauthorized)
 }
 
 /// Get current risk configuration
@@ -349,25 +347,6 @@ pub fn check_emergency_pause(env: &Env) -> Result<(), RiskManagementError> {
 
 
 
-<<<<<<< feature/risk-management-parameters
-=======
-/// Get liquidation incentive
-pub fn get_liquidation_incentive(env: &Env) -> Result<i128, RiskManagementError> {
-    let config = get_risk_config(env).ok_or(RiskManagementError::InvalidParameter)?;
-    Ok(config.liquidation_incentive)
-}
-
-/// Emit risk parameters updated event
-fn emit_risk_params_updated_event(env: &Env, caller: &Address, config: &RiskConfig) {
-    emit_risk_params_updated(
-        env,
-        RiskParamsUpdatedEvent {
-            actor: caller.clone(),
-            timestamp: config.last_update,
-        },
-    );
-}
->>>>>>> main
 
 /// Emit pause switch updated event
 fn emit_pause_switch_updated_event(env: &Env, caller: &Address, operation: &Symbol, paused: bool) {

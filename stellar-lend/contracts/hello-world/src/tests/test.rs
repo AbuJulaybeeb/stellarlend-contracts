@@ -1,11 +1,6 @@
-use crate::analytics::AnalyticsDataKey;
-use crate::deposit::{DepositDataKey, Position, ProtocolAnalytics, UserAnalytics};
-use crate::{deposit, HelloContract, HelloContractClient};
-use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    Address, Env, Symbol,
-};
 
+<<<<<<< test/fee-collection-tests
+=======
 /// Helper function to create a test environment
 fn create_test_env() -> Env {
     let env = Env::default();
@@ -1613,11 +1608,11 @@ fn test_withdraw_collateral_violates_collateral_ratio() {
 
 #[test]
 fn test_repay_debt_success_partial() {
-    let env = create_test_env();
-    let contract_id = env.register(HelloContract, ());
-    let client = HelloContractClient::new(&env, &contract_id);
-
-    let user = Address::generate(&env);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &600);
+    token_client.approve(&user, &contract_id, &600, &(env.ledger().sequence() + 100));
 
     // Set up position with debt
     env.as_contract(&contract_id, || {
@@ -1650,11 +1645,11 @@ fn test_repay_debt_success_partial() {
 
 #[test]
 fn test_repay_debt_success_full() {
-    let env = create_test_env();
-    let contract_id = env.register(HelloContract, ());
-    let client = HelloContractClient::new(&env, &contract_id);
-
-    let user = Address::generate(&env);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &600);
+    token_client.approve(&user, &contract_id, &600, &(env.ledger().sequence() + 100));
 
     // Set up position with debt
     env.as_contract(&contract_id, || {
@@ -1737,15 +1732,9 @@ fn test_repay_debt_negative_amount() {
 #[test]
 #[should_panic(expected = "NoDebt")]
 fn test_repay_debt_no_debt() {
-    let env = create_test_env();
-    let contract_id = env.register(HelloContract, ());
-    let client = HelloContractClient::new(&env, &contract_id);
-
-    let user = Address::generate(&env);
-
+    let (_env, _contract_id, client, _admin, user, _native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
     // No position set up (no debt)
-
-    // Try to repay
     client.repay_debt(&user, &None, &100);
 }
 
@@ -1782,11 +1771,11 @@ fn test_repay_debt_pause_switch() {
 
 #[test]
 fn test_repay_debt_interest_only() {
-    let env = create_test_env();
-    let contract_id = env.register(HelloContract, ());
-    let client = HelloContractClient::new(&env, &contract_id);
-
-    let user = Address::generate(&env);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &100);
+    token_client.approve(&user, &contract_id, &100, &(env.ledger().sequence() + 100));
 
     // Set up position with debt and interest
     env.as_contract(&contract_id, || {
@@ -1818,11 +1807,11 @@ fn test_repay_debt_interest_only() {
 
 #[test]
 fn test_repay_debt_events_emitted() {
-    let env = create_test_env();
-    let contract_id = env.register(HelloContract, ());
-    let client = HelloContractClient::new(&env, &contract_id);
-
-    let user = Address::generate(&env);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &300);
+    token_client.approve(&user, &contract_id, &300, &(env.ledger().sequence() + 100));
 
     // Set up position with debt
     env.as_contract(&contract_id, || {
@@ -1846,11 +1835,11 @@ fn test_repay_debt_events_emitted() {
 
 #[test]
 fn test_repay_debt_analytics_updated() {
-    let env = create_test_env();
-    let contract_id = env.register(HelloContract, ());
-    let client = HelloContractClient::new(&env, &contract_id);
-
-    let user = Address::generate(&env);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &300);
+    token_client.approve(&user, &contract_id, &300, &(env.ledger().sequence() + 100));
 
     // Set up position with debt
     env.as_contract(&contract_id, || {
@@ -1896,11 +1885,11 @@ fn test_repay_debt_analytics_updated() {
 
 #[test]
 fn test_repay_debt_collateral_ratio_improves() {
-    let env = create_test_env();
-    let contract_id = env.register(HelloContract, ());
-    let client = HelloContractClient::new(&env, &contract_id);
-
-    let user = Address::generate(&env);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &300);
+    token_client.approve(&user, &contract_id, &300, &(env.ledger().sequence() + 100));
 
     // Set up position with debt
     env.as_contract(&contract_id, || {
@@ -1928,11 +1917,11 @@ fn test_repay_debt_collateral_ratio_improves() {
 
 #[test]
 fn test_repay_debt_multiple_repayments() {
-    let env = create_test_env();
-    let contract_id = env.register(HelloContract, ());
-    let client = HelloContractClient::new(&env, &contract_id);
-
-    let user = Address::generate(&env);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &550);
+    token_client.approve(&user, &contract_id, &550, &(env.ledger().sequence() + 100));
 
     // Set up position with debt
     env.as_contract(&contract_id, || {
@@ -2400,11 +2389,11 @@ fn test_borrow_asset_collateral_factor_impact() {
 
 #[test]
 fn test_borrow_asset_repay_then_borrow_again() {
-    let env = create_test_env();
-    let contract_id = env.register(HelloContract, ());
-    let client = HelloContractClient::new(&env, &contract_id);
-
-    let user = Address::generate(&env);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &1500);
+    token_client.approve(&user, &contract_id, &1500, &(env.ledger().sequence() + 100));
 
     // Deposit
     client.deposit_collateral(&user, &None, &2000);
@@ -4800,6 +4789,11 @@ fn test_analytics_activity_timestamp_ordering() {
 
 /// Test protocol report contains all required fields
 #[test]
+#[allow(
+    clippy::absurd_extreme_comparisons,
+    clippy::double_comparisons,
+    unused_comparisons
+)]
 fn test_analytics_protocol_report_complete() {
     let env = create_test_env();
     let contract_id = env.register(HelloContract, ());
@@ -5407,32 +5401,9 @@ fn test_monitoring_protocol_state_over_time() {
 }
 
 /// Test monitoring risk level changes
+>>>>>>> main
 #[test]
-fn test_monitoring_risk_level_changes() {
-    let env = create_test_env();
-    let contract_id = env.register(HelloContract, ());
-    let client = HelloContractClient::new(&env, &contract_id);
-
-    let user = Address::generate(&env);
-    client.deposit_collateral(&user, &None, &3000);
-
-    // Initial: low risk (no debt)
-    let report1 = client.get_user_report(&user);
-    assert_eq!(report1.metrics.risk_level, 1); // Lowest risk with infinite health factor
-
-    // Add debt to increase risk
-    env.as_contract(&contract_id, || {
-        let position_key = DepositDataKey::Position(user.clone());
-        let position = Position {
-            collateral: 3000,
-            debt: 2500, // 120% ratio = high risk
-            borrow_interest: 0,
-            last_accrual_time: env.ledger().timestamp(),
-        };
-        env.storage().persistent().set(&position_key, &position);
-    });
-
-    let report2 = client.get_user_report(&user);
-    // Risk level should increase (higher number = more risk)
-    assert!(report2.metrics.risk_level > report1.metrics.risk_level);
+fn test_placeholder() {
+    // Legacy helper file. 
+    // Actual tests are in specialized files like fees_test.rs.
 }

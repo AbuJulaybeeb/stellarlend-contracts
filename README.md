@@ -300,6 +300,7 @@ For a complete list of entrypoints including AMM, flash loans, bridge, governanc
 ## Documentation
 
 - **[Protocol Documentation](docs/README.md)**: Comprehensive protocol documentation including modules, admin operations, monitoring, analytics, and upgrade procedures
+- **[Storage Layout and Migration](docs/storage.md)**: Detailed documentation of the contract's persistent storage structure, keys, types, and upgrade/migration strategies
 - **[Contract README](stellar-lend/contracts/hello-world/README.md)**: Contract-specific documentation and entrypoint reference
 - **[CI/CD Documentation](ci-doc.md)**: Continuous integration setup and local reproduction guide
 - **[Example Reports](docs/examples/)**: Example JSON outputs for protocol and user analytics

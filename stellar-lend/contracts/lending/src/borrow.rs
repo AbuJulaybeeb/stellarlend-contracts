@@ -34,6 +34,8 @@ pub enum BorrowError {
     AssetNotSupported = 7,
     /// Borrow amount is below the configured minimum
     BelowMinimumBorrow = 8,
+    /// Repay amount exceeds current debt
+    RepayAmountTooHigh = 9,
 }
 
 /// Storage keys for protocol-wide data.
@@ -57,6 +59,10 @@ pub enum BorrowDataKey {
     BorrowCollateralRatio,
     /// Minimum borrow amount
     BorrowMinAmount,
+    /// Oracle contract address for price feeds (optional)
+    OracleAddress,
+    /// Liquidation threshold in basis points (e.g. 8000 = 80%)
+    LiquidationThresholdBps,
 }
 
 /// User debt position tracking.
@@ -83,19 +89,31 @@ pub struct BorrowCollateral {
     pub asset: Address,
 }
 
-/// Event data emitted on each borrow operation.
 #[contractevent]
 #[derive(Clone, Debug)]
 pub struct BorrowEvent {
-    /// Borrower's address
     pub user: Address,
-    /// Borrowed asset address
     pub asset: Address,
-    /// Amount borrowed
     pub amount: i128,
-    /// Collateral amount provided
     pub collateral: i128,
-    /// Ledger timestamp of the borrow
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct DepositEvent {
+    pub user: Address,
+    pub asset: Address,
+    pub amount: i128,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct RepayEvent {
+    pub user: Address,
+    pub asset: Address,
+    pub amount: i128,
     pub timestamp: u64,
 }
 
@@ -169,6 +187,113 @@ pub fn borrow(
     Ok(())
 }
 
+/// Deposit collateral
+///
+/// # Arguments
+/// * `env` - The contract environment
+/// * `user` - The user's address
+/// * `asset` - The collateral asset
+/// * `amount` - The amount to deposit
+pub fn deposit(env: &Env, user: Address, asset: Address, amount: i128) -> Result<(), BorrowError> {
+    if amount <= 0 {
+        return Err(BorrowError::InvalidAmount);
+    }
+
+    let mut collateral_position = get_collateral_position(env, &user);
+
+    // If it's the first deposit, set the asset
+    if collateral_position.amount == 0 {
+        collateral_position.asset = asset.clone();
+    } else if collateral_position.asset != asset {
+        return Err(BorrowError::AssetNotSupported);
+    }
+
+    collateral_position.amount = collateral_position
+        .amount
+        .checked_add(amount)
+        .ok_or(BorrowError::Overflow)?;
+
+    save_collateral_position(env, &user, &collateral_position);
+
+    DepositEvent {
+        user,
+        asset,
+        amount,
+        timestamp: env.ledger().timestamp(),
+    }
+    .publish(env);
+
+    Ok(())
+}
+
+/// Repay borrowed assets
+///
+/// # Arguments
+/// * `env` - The contract environment
+/// * `user` - The user's address
+/// * `asset` - The borrowed asset
+/// * `amount` - The amount to repay
+pub fn repay(env: &Env, user: Address, asset: Address, amount: i128) -> Result<(), BorrowError> {
+    if amount <= 0 {
+        return Err(BorrowError::InvalidAmount);
+    }
+
+    let mut debt_position = get_debt_position(env, &user);
+
+    if debt_position.borrowed_amount == 0 && debt_position.interest_accrued == 0 {
+        return Err(BorrowError::InvalidAmount);
+    }
+
+    if debt_position.asset != asset {
+        return Err(BorrowError::AssetNotSupported);
+    }
+
+    // First repay interest, then principal
+    let accrued_interest = calculate_interest(env, &debt_position);
+    debt_position.interest_accrued = debt_position
+        .interest_accrued
+        .checked_add(accrued_interest)
+        .ok_or(BorrowError::Overflow)?;
+    debt_position.last_update = env.ledger().timestamp();
+
+    let mut remaining_repayment = amount;
+
+    // Repay interest first
+    if remaining_repayment >= debt_position.interest_accrued {
+        remaining_repayment -= debt_position.interest_accrued;
+        debt_position.interest_accrued = 0;
+    } else {
+        debt_position.interest_accrued -= remaining_repayment;
+        remaining_repayment = 0;
+    }
+
+    // Repay principal
+    if remaining_repayment > 0 {
+        if remaining_repayment > debt_position.borrowed_amount {
+            return Err(BorrowError::RepayAmountTooHigh);
+        }
+        debt_position.borrowed_amount -= remaining_repayment;
+
+        // Update total protocol debt
+        let total_debt = get_total_debt(env);
+        let new_total = total_debt.saturating_sub(remaining_repayment);
+        set_total_debt(env, new_total);
+    }
+
+    save_debt_position(env, &user, &debt_position);
+
+    RepayEvent {
+        user,
+        asset,
+        amount,
+        timestamp: env.ledger().timestamp(),
+    }
+    .publish(env);
+
+    Ok(())
+}
+
+/// Validate collateral ratio meets minimum requirements
 fn validate_collateral_ratio(collateral: i128, borrow: i128) -> Result<(), BorrowError> {
     let min_collateral = borrow
         .checked_mul(COLLATERAL_RATIO_MIN)
@@ -307,4 +432,52 @@ pub fn get_admin(env: &Env) -> Option<Address> {
     env.storage()
         .persistent()
         .get(&BorrowDataKey::ProtocolAdmin)
+}
+
+/// Returns the oracle address if configured. Used by views for collateral/debt valuation.
+pub fn get_oracle(env: &Env) -> Option<Address> {
+    env.storage()
+        .persistent()
+        .get(&BorrowDataKey::OracleAddress)
+}
+
+/// Returns liquidation threshold in basis points (e.g. 8000 = 80%). Default 8000 if not set.
+pub fn get_liquidation_threshold_bps(env: &Env) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&BorrowDataKey::LiquidationThresholdBps)
+        .unwrap_or(8000)
+}
+
+/// Set oracle address for price feeds (admin only). Caller must be admin and authorize.
+pub fn set_oracle(env: &Env, admin: &Address, oracle: Address) -> Result<(), BorrowError> {
+    let current = get_admin(env).ok_or(BorrowError::Unauthorized)?;
+    if *admin != current {
+        return Err(BorrowError::Unauthorized);
+    }
+    admin.require_auth();
+    env.storage()
+        .persistent()
+        .set(&BorrowDataKey::OracleAddress, &oracle);
+    Ok(())
+}
+
+/// Set liquidation threshold in basis points (admin only). E.g. 8000 = 80%.
+pub fn set_liquidation_threshold_bps(
+    env: &Env,
+    admin: &Address,
+    bps: i128,
+) -> Result<(), BorrowError> {
+    let current = get_admin(env).ok_or(BorrowError::Unauthorized)?;
+    if *admin != current {
+        return Err(BorrowError::Unauthorized);
+    }
+    admin.require_auth();
+    if bps <= 0 || bps > 10000 {
+        return Err(BorrowError::InvalidAmount);
+    }
+    env.storage()
+        .persistent()
+        .set(&BorrowDataKey::LiquidationThresholdBps, &bps);
+    Ok(())
 }

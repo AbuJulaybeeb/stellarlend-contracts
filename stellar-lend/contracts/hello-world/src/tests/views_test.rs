@@ -94,12 +94,14 @@ fn test_get_user_report_after_withdraw() {
 
 #[test]
 fn test_get_user_report_after_repay() {
-    let env = create_test_env();
-    let (_contract_id, _admin, client) = setup_contract_with_admin(&env);
-    let user = Address::generate(&env);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &2500);
 
     client.deposit_collateral(&user, &None, &5000);
     client.borrow_asset(&user, &None, &2000);
+    token_client.approve(&user, &contract_id, &500, &(env.ledger().sequence() + 100));
     client.repay_debt(&user, &None, &500);
 
     let report = client.get_user_report(&user);
@@ -248,13 +250,15 @@ fn test_get_user_report_no_activity_fails() {
 
 #[test]
 fn test_position_consistency_after_multiple_ops() {
-    let env = create_test_env();
-    let (_contract_id, _admin, client) = setup_contract_with_admin(&env);
-    let user = Address::generate(&env);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &2500);
 
     client.deposit_collateral(&user, &None, &10000);
     client.borrow_asset(&user, &None, &2000);
     client.deposit_collateral(&user, &None, &1000);
+    token_client.approve(&user, &contract_id, &500, &(env.ledger().sequence() + 100));
     client.repay_debt(&user, &None, &500);
 
     let report = client.get_user_report(&user);

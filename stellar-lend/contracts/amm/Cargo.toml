@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "stellarlend_amm"
-crate-type = ["cdylib"]
+crate-type = ["lib", "cdylib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
@@ -16,3 +16,5 @@ soroban-sdk = { workspace = true, features = ["testutils"] }
 
 [features]
 testutils = ["soroban-sdk/testutils"]
+# Enable to build liquidation integration tests (requires lending crate dependency)
+liquidate_integration = []

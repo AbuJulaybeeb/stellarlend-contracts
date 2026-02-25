@@ -1,3 +1,4 @@
+#![allow(unused_variables)]
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, log, symbol_short, Address,
     Env, String, Symbol, Vec,
@@ -63,8 +64,11 @@ pub struct BridgeWithdrawalEvent {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 const MAX_FEE_BPS: u64 = 1_000; // 10 % ceiling
+#[allow(dead_code)]
 const MAX_ID_LEN: u32 = 64;
+#[allow(dead_code)]
 const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
 
 // ── Storage types ─────────────────────────────────────────────────────────────
@@ -87,9 +91,11 @@ pub enum DataKey {
 }
 
 #[contract]
+#[allow(dead_code)]
 pub struct BridgeContract;
 
 #[contractimpl]
+#[allow(dead_code)]
 impl BridgeContract {
     pub fn init(env: Env, admin: Address) -> Result<(), ContractError> {
         if env.storage().instance().has(&ADMIN_KEY) {

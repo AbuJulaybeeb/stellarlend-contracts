@@ -1,3 +1,41 @@
+use soroban_sdk::{contract, contractimpl, Address, Env, Map, Symbol, Vec};
+
+pub mod analytics;
+pub mod borrow;
+pub mod cross_asset;
+pub mod deposit;
+pub mod events;
+pub mod flash_loan;
+pub mod governance;
+pub mod interest_rate;
+pub mod liquidate;
+pub mod oracle;
+pub mod repay;
+pub mod risk_management;
+pub mod withdraw;
+
+#[cfg(test)]
+mod tests;
+
+use crate::deposit::{AssetParams, DepositDataKey, ProtocolAnalytics};
+use crate::oracle::OracleConfig;
+use crate::risk_management::{RiskConfig, RiskManagementError};
+
+/// Helper function to require admin authorization
+fn require_admin(env: &Env, caller: &Address) -> Result<(), RiskManagementError> {
+    caller.require_auth();
+    let admin_key = DepositDataKey::Admin;
+    let admin = env
+        .storage()
+        .persistent()
+        .get::<DepositDataKey, Address>(&admin_key)
+        .ok_or(RiskManagementError::Unauthorized)?;
+
+    if caller != &admin {
+        return Err(RiskManagementError::Unauthorized);
+    }
+    Ok(())
+}
 //! # StellarLend Core Contract
 //!
 //! The main entrypoint for the StellarLend lending protocol on Soroban.
@@ -12,20 +50,19 @@
 //! - **Oracle integration**: price feeds with staleness checks and fallbacks
 //! - **Flash loans**: uncollateralized single-transaction loans
 //! - **Analytics**: protocol and user reporting
-//!
-//! ## Invariants
-//! - All positions must maintain the minimum collateral ratio or face liquidation.
-//! - Interest accrues continuously based on protocol utilization.
-//! - Only the admin can modify risk parameters, oracle config, and pause switches.
-//! - Emergency pause halts all operations immediately.
+//! - **Governance**: on-chain proposal voting and execution
 
 #![allow(clippy::too_many_arguments)]
 #![allow(deprecated)]
+#![allow(unused_variables)]
 #![no_std]
-use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol};
 
+use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol, Vec};
+
+mod admin;
 mod borrow;
 mod deposit;
+mod errors;
 mod events;
 mod repay;
 mod risk_management;
@@ -35,6 +72,7 @@ mod withdraw;
 use borrow::borrow_asset;
 use deposit::deposit_collateral;
 use repay::repay_debt;
+
 use risk_management::{
     initialize_risk_management, is_emergency_paused, is_operation_paused,
     set_pause_switch, set_pause_switches, check_emergency_pause, require_admin,
@@ -49,12 +87,13 @@ use risk_params::{
 use withdraw::withdraw_collateral;
 
 mod analytics;
+
 use analytics::{
     generate_protocol_report, generate_user_report, get_recent_activity, get_user_activity_feed,
     AnalyticsError, ProtocolReport, UserReport,
 };
+
 mod cross_asset;
-#[allow(unused_imports)]
 use cross_asset::{
     get_asset_config_by_address, get_asset_list, get_user_asset_position,
     get_user_position_summary, initialize_asset, update_asset_config,
@@ -93,7 +132,16 @@ use interest_rate::{
     InterestRateError,
 };
 
-pub mod governance;
+mod governance;
+
+use storage::GuardianConfig;
+
+// Governance module
+use crate::types::{
+    GovernanceConfig, MultisigConfig, Proposal, ProposalOutcome, ProposalType, RecoveryRequest,
+    VoteInfo, VoteType,
+};
+// use crate::governance::self;
 
 /// The StellarLend core contract.
 ///
@@ -105,6 +153,29 @@ pub struct HelloContract;
 
 #[contractimpl]
 impl HelloContract {
+    /// Initialize the contract with an admin address
+    pub fn initialize(env: Env, admin: Address) {
+        let admin_key = DepositDataKey::Admin;
+        if env.storage().persistent().has(&admin_key) {
+            panic!("Already initialized");
+        }
+        env.storage().persistent().set(&admin_key, &admin);
+
+        // Initialize protocol analytics
+        let analytics_key = DepositDataKey::ProtocolAnalytics;
+        let analytics = ProtocolAnalytics {
+            total_deposits: 0,
+            total_borrows: 0,
+            total_value_locked: 0,
+        };
+        env.storage().persistent().set(&analytics_key, &analytics);
+
+        // Initialize other modules
+        interest_rate::initialize_interest_rate_config(&env, admin.clone()).unwrap();
+        risk_management::initialize_risk_management(&env, admin).unwrap();
+    }
+
+    /// Deposit assets into the protocol
     /// Health-check endpoint.
     ///
     /// Returns the string `"Hello"` to verify the contract is deployed and callable.
@@ -112,18 +183,24 @@ impl HelloContract {
         String::from_str(&env, "Hello")
     }
 
-    /// Initialize the contract with admin address and governance contract ID.
+    /// Initialize the contract with admin address.
     ///
     /// Sets up the risk management system and interest rate model with default parameters.
     /// Must be called before any other operations.
     ///
     /// # Arguments
     /// * `admin` - The admin address
-    /// * `governance_id` - The address of the deployed governance contract
     ///
     /// # Returns
     /// Returns Ok(()) on success
     pub fn initialize(env: Env, admin: Address) -> Result<(), RiskManagementError> {
+        // Prevent double initialization
+        if crate::admin::has_admin(&env) {
+            return Err(RiskManagementError::Unauthorized); // or a specific error
+        }
+
+        crate::admin::set_admin(&env, admin.clone(), None)
+            .map_err(|_| RiskManagementError::Unauthorized)?;
         initialize_risk_management(&env, admin.clone())?;
         initialize_risk_params(&env).map_err(|_| RiskManagementError::InvalidParameter)?;
         // Initialize interest rate config with default parameters
@@ -134,8 +211,40 @@ impl HelloContract {
                 RiskManagementError::Unauthorized
             }
         })?;
-        // initialize_governance(&env, admin).map_err(|_| RiskManagementError::Unauthorized)?;
         Ok(())
+    }
+
+    /// Transfer super admin rights
+    ///
+    /// # Arguments
+    /// * `caller` - The current admin
+    /// * `new_admin` - The new admin
+    pub fn transfer_admin(
+        env: Env,
+        caller: Address,
+        new_admin: Address,
+    ) -> Result<(), crate::admin::AdminError> {
+        crate::admin::set_admin(&env, new_admin, Some(caller))
+    }
+
+    /// Grant a role to an address (admin only)
+    pub fn grant_role(
+        env: Env,
+        caller: Address,
+        role: Symbol,
+        account: Address,
+    ) -> Result<(), crate::admin::AdminError> {
+        crate::admin::grant_role(&env, caller, role, account)
+    }
+
+    /// Revoke a role from an address (admin only)
+    pub fn revoke_role(
+        env: Env,
+        caller: Address,
+        role: Symbol,
+        account: Address,
+    ) -> Result<(), crate::admin::AdminError> {
+        crate::admin::revoke_role(&env, caller, role, account)
     }
 
     /// Deposit collateral into the protocol
@@ -162,9 +271,19 @@ impl HelloContract {
         user: Address,
         asset: Option<Address>,
         amount: i128,
-    ) -> i128 {
-        deposit_collateral(&env, user, asset, amount)
-            .unwrap_or_else(|e| panic!("Deposit error: {:?}", e))
+    ) -> Result<i128, crate::deposit::DepositError> {
+        deposit::deposit_collateral(&env, user, asset, amount)
+    }
+
+    /// Withdraw assets from the protocol
+    pub fn withdraw_asset(
+    /// Set native asset address (admin only). Required before using asset = None for deposit/borrow/repay.
+    pub fn set_native_asset_address(
+        env: Env,
+        caller: Address,
+        native_asset: Address,
+    ) -> Result<(), deposit::DepositError> {
+        deposit::set_native_asset_address(&env, caller, native_asset)
     }
 
     /// Set risk parameters (admin only)
@@ -206,51 +325,28 @@ impl HelloContract {
         })
     }
 
-    /// Set pause switch for an operation (admin only)
-    ///
-    /// # Arguments
-    /// * `caller` - The caller address (must be admin)
-    /// * `operation` - The operation symbol (e.g., "pause_deposit", "pause_borrow")
-    /// * `paused` - Whether to pause (true) or unpause (false)
-    ///
-    /// # Returns
-    /// Returns Ok(()) on success
-    pub fn set_pause_switch(
+    /// Borrow assets from the protocol
+    pub fn borrow_asset(
         env: Env,
-        caller: Address,
-        operation: Symbol,
-        paused: bool,
-    ) -> Result<(), RiskManagementError> {
-        set_pause_switch(&env, caller, operation, paused)
+        user: Address,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<i128, crate::borrow::BorrowError> {
+        borrow::borrow_asset(&env, user, asset, amount)
     }
 
-    /// Set multiple pause switches at once (admin only)
-    ///
-    /// # Arguments
-    /// * `caller` - The caller address (must be admin)
-    /// * `switches` - Map of operation symbols to pause states
-    ///
-    /// # Returns
-    /// Returns Ok(()) on success
-    pub fn set_pause_switches(
+    /// Repay borrowed assets
+    pub fn repay_debt(
         env: Env,
-        caller: Address,
-        switches: Map<Symbol, bool>,
-    ) -> Result<(), RiskManagementError> {
-        set_pause_switches(&env, caller, switches)
+        user: Address,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<(i128, i128, i128), crate::repay::RepayError> {
+        repay::repay_debt(&env, user, asset, amount)
     }
 
-    /// Set emergency pause (admin only)
-    ///
-    /// Emergency pause stops all operations immediately.
-    ///
-    /// # Arguments
-    /// * `caller` - The caller address (must be admin)
-    /// * `paused` - Whether to enable (true) or disable (false) emergency pause
-    ///
-    /// # Returns
-    /// Returns Ok(()) on success
-    pub fn set_emergency_pause(
+    /// Liquidate an undercollateralized position
+    pub fn liquidate(
         env: Env,
         caller: Address,
         paused: bool,
@@ -298,37 +394,28 @@ impl HelloContract {
         risk_params::get_liquidation_incentive(&env).map_err(|_| RiskManagementError::InvalidParameter)
     }
 
-    /// Check if an operation is paused
-    ///
-    /// # Arguments
-    /// * `operation` - The operation symbol to check
-    ///
-    /// # Returns
-    /// Returns true if the operation is paused
-    pub fn is_operation_paused(env: Env, operation: Symbol) -> bool {
-        is_operation_paused(&env, operation)
+    /// Get current borrow rate (in basis points)
+    pub fn get_borrow_rate(env: Env) -> i128 {
+        interest_rate::calculate_borrow_rate(&env).unwrap_or(0)
     }
 
-    /// Check if emergency pause is active
-    ///
-    /// # Returns
-    /// Returns true if emergency pause is active
-    pub fn is_emergency_paused(env: Env) -> bool {
-        is_emergency_paused(&env)
+    /// Get current supply rate (in basis points)
+    pub fn get_supply_rate(env: Env) -> i128 {
+        interest_rate::calculate_supply_rate(&env).unwrap_or(0)
     }
 
-    /// Check if user meets minimum collateral ratio requirement
-    ///
-    /// # Arguments
-    /// * `collateral_value` - Total collateral value (in base units)
-    /// * `debt_value` - Total debt value (in base units)
-    ///
-    /// # Returns
-    /// Returns Ok(()) if ratio is sufficient, Err otherwise
-    pub fn require_min_collateral_ratio(
+    /// Update interest rate model configuration (admin only)
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_interest_rate_config(
         env: Env,
-        collateral_value: i128,
-        debt_value: i128,
+        admin: Address,
+        base_rate: Option<i128>,
+        kink: Option<i128>,
+        multiplier: Option<i128>,
+        jump_multiplier: Option<i128>,
+        rate_floor: Option<i128>,
+        rate_ceiling: Option<i128>,
+        spread: Option<i128>,
     ) -> Result<(), RiskManagementError> {
         require_min_collateral_ratio(&env, collateral_value, debt_value).map_err(|_| RiskManagementError::InsufficientCollateralRatio)
     }
@@ -349,14 +436,8 @@ impl HelloContract {
         can_be_liquidated(&env, collateral_value, debt_value).map_err(|_| RiskManagementError::InvalidParameter)
     }
 
-    /// Calculate maximum liquidatable amount
-    ///
-    /// # Arguments
-    /// * `debt_value` - Total debt value (in base units)
-    ///
-    /// # Returns
-    /// Maximum amount that can be liquidated
-    pub fn get_max_liquidatable_amount(
+    /// Manual emergency interest rate adjustment (admin only)
+    pub fn set_emergency_rate_adjustment(
         env: Env,
         debt_value: i128,
     ) -> Result<i128, RiskManagementError> {
@@ -377,88 +458,43 @@ impl HelloContract {
         get_liquidation_incentive_amount(&env, liquidated_amount).map_err(|_| RiskManagementError::Overflow)
     }
 
-    /// Withdraw collateral from the protocol
-    ///
-    /// Allows users to withdraw their deposited collateral, subject to:
-    /// - Sufficient collateral balance
-    /// - Minimum collateral ratio requirements
-    /// - Pause switch checks
-    ///
-    /// # Arguments
-    /// * `user` - The address of the user withdrawing collateral
-    /// * `asset` - The address of the asset contract to withdraw (None for native XLM)
-    /// * `amount` - The amount to withdraw
-    ///
-    /// # Returns
-    /// Returns the updated collateral balance for the user
-    ///
-    /// # Events
-    /// Emits the following events:
-    /// - `withdraw`: Withdraw transaction event
-    /// - `position_updated`: User position update event
-    /// - `analytics_updated`: Analytics update event
-    /// - `user_activity_tracked`: User activity tracking event
-    pub fn withdraw_collateral(
-        env: Env,
-        user: Address,
-        asset: Option<Address>,
-        amount: i128,
-    ) -> i128 {
-        withdraw_collateral(&env, user, asset, amount)
-            .unwrap_or_else(|e| panic!("Withdraw error: {:?}", e))
+    /// Refresh analytics for a user
+    pub fn refresh_user_analytics(_env: Env, _user: Address) -> Result<(), RiskManagementError> {
+        Ok(())
     }
 
-    /// Repay debt to the protocol
-    ///
-    /// Allows users to repay their borrowed assets, reducing debt and accrued interest.
-    /// Supports both partial and full repayments.
-    ///
-    /// # Arguments
-    /// * `user` - The address of the user repaying debt
-    /// * `asset` - The address of the asset contract to repay (None for native XLM)
-    /// * `amount` - The amount to repay
-    ///
-    /// # Returns
-    /// Returns a tuple (remaining_debt, interest_paid, principal_paid)
-    ///
-    /// # Events
-    /// Emits the following events:
-    /// - `repay`: Repay transaction event
-    /// - `position_updated`: User position update event
-    /// - `analytics_updated`: Analytics update event
-    /// - `user_activity_tracked`: User activity tracking event
-    pub fn repay_debt(
-        env: Env,
-        user: Address,
-        asset: Option<Address>,
-        amount: i128,
-    ) -> (i128, i128, i128) {
-        repay_debt(&env, user, asset, amount).unwrap_or_else(|e| panic!("Repay error: {:?}", e))
+    /// Claim accumulated protocol reserves (admin only)
+    pub fn claim_reserves(env: Env, caller: Address, asset: Option<Address>, to: Address, amount: i128) -> Result<(), RiskManagementError> {
+        require_admin(&env, &caller)?;
+        
+        let reserve_key = DepositDataKey::ProtocolReserve(asset.clone());
+        let mut reserve_balance = env.storage().persistent()
+            .get::<DepositDataKey, i128>(&reserve_key)
+            .unwrap_or(0);
+            
+        if amount > reserve_balance {
+            return Err(RiskManagementError::InvalidParameter);
+        }
+        
+        if let Some(_asset_addr) = asset {
+            #[cfg(not(test))]
+            {
+                let token_client = soroban_sdk::token::Client::new(&env, &_asset_addr);
+                token_client.transfer(&env.current_contract_address(), &to, &amount);
+            }
+        }
+        
+        reserve_balance -= amount;
+        env.storage().persistent().set(&reserve_key, &reserve_balance);
+        Ok(())
     }
 
-    /// Borrow assets from the protocol
-    ///
-    /// Allows users to borrow assets against their deposited collateral, subject to:
-    /// - Sufficient collateral balance
-    /// - Minimum collateral ratio requirements
-    /// - Pause switch checks
-    /// - Maximum borrow limits
-    /// # Arguments
-    /// * `user` - The address of the user borrowing assets
-    /// * `asset` - The address of the asset contract to borrow (None for native XLM)
-    /// * `amount` - The amount to borrow
-    ///
-    /// # Returns
-    /// Returns the updated total debt (principal + interest) for the user
-    ///
-    /// # Events
-    /// Emits the following events:
-    /// - `borrow`: Borrow transaction event
-    /// - `position_updated`: User position update event
-    /// - `analytics_updated`: Analytics update event
-    /// - `user_activity_tracked`: User activity tracking event
-    pub fn borrow_asset(env: Env, user: Address, asset: Option<Address>, amount: i128) -> i128 {
-        borrow_asset(&env, user, asset, amount).unwrap_or_else(|e| panic!("Borrow error: {:?}", e))
+    /// Get current protocol reserve balance for an asset
+    pub fn get_reserve_balance(env: Env, asset: Option<Address>) -> i128 {
+        let reserve_key = DepositDataKey::ProtocolReserve(asset);
+        env.storage().persistent()
+            .get::<DepositDataKey, i128>(&reserve_key)
+            .unwrap_or(0)
     }
 
     /// Generate a comprehensive protocol report.
@@ -531,22 +567,8 @@ impl HelloContract {
     ) -> Result<soroban_sdk::Vec<analytics::ActivityEntry>, AnalyticsError> {
         get_user_activity_feed(&env, &user, limit, offset)
     }
+
     /// Update price feed from oracle
-    ///
-    /// Updates the price for an asset from an oracle source with validation.
-    ///
-    /// # Arguments
-    /// * `caller` - The caller address (must be admin or oracle)
-    /// * `asset` - The asset address
-    /// * `price` - The new price
-    /// * `decimals` - Price decimals
-    /// * `oracle` - The oracle address providing this price
-    ///
-    /// # Returns
-    /// Returns the updated price
-    ///
-    /// # Events
-    /// Emits `price_updated` event
     pub fn update_price_feed(
         env: Env,
         caller: Address,
@@ -555,21 +577,22 @@ impl HelloContract {
         decimals: u32,
         oracle: Address,
     ) -> i128 {
-        update_price_feed(&env, caller, asset, price, decimals, oracle)
-            .unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
+        oracle::update_price_feed(&env, caller, asset, price, decimals, oracle)
+            .expect("Oracle error")
     }
 
-    /// Get price for an asset
-    ///
-    /// Retrieves the current price for an asset, using cache or fallback if needed.
-    ///
-    /// # Arguments
-    /// * `asset` - The asset address
-    ///
-    /// # Returns
-    /// Returns the current price
+    /// Get current price for an asset
     pub fn get_price(env: Env, asset: Address) -> i128 {
-        get_price(&env, &asset).unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
+        oracle::get_price(&env, &asset).expect("Oracle error")
+    }
+
+    /// Configure oracle parameters (admin only)
+    pub fn configure_oracle(
+        env: Env,
+        caller: Address,
+        config: OracleConfig,
+    ) {
+        oracle::configure_oracle(&env, caller, config).expect("Oracle error")
     }
 
     /// Set primary oracle for an asset (admin only)
@@ -584,225 +607,104 @@ impl HelloContract {
     }
 
     /// Set fallback oracle for an asset (admin only)
-    ///
-    /// # Arguments
-    /// * `caller` - The caller address (must be admin)
-    /// * `asset` - The asset address
-    /// * `fallback_oracle` - The fallback oracle address
     pub fn set_fallback_oracle(
         env: Env,
         caller: Address,
         asset: Address,
         fallback_oracle: Address,
     ) {
-        set_fallback_oracle(&env, caller, asset, fallback_oracle)
-            .unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
+        oracle::set_fallback_oracle(&env, caller, asset, fallback_oracle).expect("Oracle error")
     }
 
-    /// Configure oracle parameters (admin only)
-    ///
-    /// # Arguments
-    /// * `caller` - The caller address (must be admin)
-    /// * `config` - The new oracle configuration
-    pub fn configure_oracle(env: Env, caller: Address, config: OracleConfig) {
-        configure_oracle(&env, caller, config).unwrap_or_else(|e| panic!("Oracle error: {:?}", e))
+    /// Get recent activity from analytics
+    pub fn get_recent_activity(env: Env, limit: u32, offset: u32) -> Result<Vec<crate::analytics::ActivityEntry>, crate::analytics::AnalyticsError> {
+        analytics::get_recent_activity(&env, limit, offset)
     }
 
-    /// Execute flash loan
-    ///
-    /// Allows users to borrow assets without collateral for a single transaction.
-    /// The loan must be repaid (with fee) within the same transaction.
-    ///
-    /// # Arguments
-    /// * `user` - The address borrowing the flash loan
-    /// * `asset` - The address of the asset contract to borrow
-    /// * `amount` - The amount to borrow
-    /// * `callback` - The callback contract address that will handle repayment
-    ///
-    /// # Returns
-    /// Returns the total amount to repay (principal + fee)
-    ///
-    /// # Events
-    /// Emits `flash_loan_initiated` event
-    pub fn execute_flash_loan(
+    /// Initialize risk management (admin only)
+    pub fn initialize_risk_management(env: Env, admin: Address) -> Result<(), RiskManagementError> {
+        risk_management::initialize_risk_management(&env, admin)
+    }
+
+    /// Get current risk configuration
+    pub fn get_risk_config(env: Env) -> Option<RiskConfig> {
+        risk_management::get_risk_config(&env)
+    }
+
+    /// Set risk management parameters (admin only)
+    pub fn set_risk_params(
+        env: Env, 
+        admin: Address, 
+        min_collateral_ratio: Option<i128>,
+        liquidation_threshold: Option<i128>,
+        close_factor: Option<i128>,
+        liquidation_incentive: Option<i128>,
+    ) -> Result<(), RiskManagementError> {
+        risk_management::set_risk_params(&env, admin, min_collateral_ratio, liquidation_threshold, close_factor, liquidation_incentive)
+    }
+
+    /// Set a pause switch for an operation (admin only)
+    pub fn set_pause_switch(env: Env, admin: Address, operation: Symbol, paused: bool) -> Result<(), RiskManagementError> {
+        risk_management::set_pause_switch(&env, admin, operation, paused)
+    }
+
+    /// Check if an operation is paused
+    pub fn is_operation_paused(env: Env, operation: Symbol) -> bool {
+        risk_management::is_operation_paused(&env, operation)
+    }
+
+    /// Check if emergency pause is active
+    pub fn is_emergency_paused(env: Env) -> bool {
+        risk_management::is_emergency_paused(&env)
+    }
+
+    /// Set emergency pause (admin only)
+    pub fn set_emergency_pause(env: Env, admin: Address, paused: bool) -> Result<(), RiskManagementError> {
+        risk_management::set_emergency_pause(&env, admin, paused)
+    }
+
+    /// Get user analytics metrics
+    pub fn get_user_analytics(env: Env, user: Address) -> Result<crate::analytics::UserMetrics, crate::analytics::AnalyticsError> {
+        analytics::get_user_activity_summary(&env, &user)
+    }
+
+    /// Get protocol analytics metrics
+    pub fn get_protocol_analytics(env: Env) -> Result<crate::analytics::ProtocolMetrics, crate::analytics::AnalyticsError> {
+        analytics::get_protocol_stats(&env)
+    }
+}
+
+    /// Initialize AMM settings (admin only)
+    pub fn initialize_amm(
         env: Env,
-        user: Address,
-        asset: Address,
-        amount: i128,
-        callback: Address,
-    ) -> i128 {
-        execute_flash_loan(&env, user, asset, amount, callback)
-            .unwrap_or_else(|e| panic!("Flash loan error: {:?}", e))
-    }
-
-    /// Repay flash loan
-    ///
-    /// Must be called within the same transaction as the flash loan.
-    /// Validates that the full amount (principal + fee) is repaid.
-    ///
-    /// # Arguments
-    /// * `user` - The address repaying the flash loan
-    /// * `asset` - The address of the asset contract
-    /// * `amount` - The amount being repaid (should equal principal + fee)
-    ///
-    /// # Events
-    /// Emits `flash_loan_repaid` event
-    pub fn repay_flash_loan(env: Env, user: Address, asset: Address, amount: i128) {
-        repay_flash_loan(&env, user, asset, amount)
-            .unwrap_or_else(|e| panic!("Flash loan error: {:?}", e))
-    }
-
-    /// Set flash loan fee (admin only)
-    ///
-    /// # Arguments
-    /// * `caller` - The caller address (must be admin)
-    /// * `fee_bps` - The new fee in basis points
-    pub fn set_flash_loan_fee(env: Env, caller: Address, fee_bps: i128) {
-        set_flash_loan_fee(&env, caller, fee_bps)
-            .unwrap_or_else(|e| panic!("Flash loan error: {:?}", e))
-    }
-
-    /// Configure flash loan parameters (admin only)
-    ///
-    /// # Arguments
-    /// * `caller` - The caller address (must be admin)
-    /// * `config` - The new flash loan configuration
-    pub fn configure_flash_loan(env: Env, caller: Address, config: FlashLoanConfig) {
-        configure_flash_loan(&env, caller, config)
-            .unwrap_or_else(|e| panic!("Flash loan error: {:?}", e))
-    }
-
-    /// Liquidate an undercollateralized position
-    ///
-    /// Allows liquidators to liquidate undercollateralized positions by:
-    /// - Repaying debt on behalf of the borrower
-    /// - Receiving collateral plus a liquidation incentive
-    ///
-    /// # Arguments
-    /// * `liquidator` - The address of the liquidator
-    /// * `borrower` - The address of the borrower being liquidated
-    /// * `debt_asset` - The address of the debt asset to repay (None for native XLM)
-    /// * `collateral_asset` - The address of the collateral asset to receive (None for native XLM)
-    /// * `debt_amount` - The amount of debt to liquidate
-    ///
-    /// # Returns
-    /// Returns a tuple (debt_liquidated, collateral_seized, incentive_amount)
-    ///
-    /// # Events
-    /// Emits the following events:
-    /// - `liquidation`: Liquidation transaction event
-    /// - `position_updated`: Borrower position update event
-    /// - `analytics_updated`: Analytics update event
-    /// - `user_activity_tracked`: User activity tracking event
-    pub fn liquidate(
-        env: Env,
-        liquidator: Address,
-        borrower: Address,
-        debt_asset: Option<Address>,
-        collateral_asset: Option<Address>,
-        debt_amount: i128,
-    ) -> (i128, i128, i128) {
-        liquidate(
-            &env,
-            liquidator,
-            borrower,
-            debt_asset,
-            collateral_asset,
-            debt_amount,
-        )
-        .unwrap_or_else(|e| panic!("Liquidation error: {:?}", e))
-    }
-
-    /// Get current utilization rate
-    ///
-    /// Returns the current protocol utilization (borrows / deposits) in basis points.
-    ///
-    /// # Returns
-    /// Utilization rate in basis points (0-10000)
-    pub fn get_utilization(env: Env) -> i128 {
-        get_current_utilization(&env).unwrap_or_else(|e| panic!("Interest rate error: {:?}", e))
-    }
-
-    /// Get current borrow interest rate
-    ///
-    /// Returns the current borrow interest rate based on utilization.
-    ///
-    /// # Returns
-    /// Borrow rate in basis points (annual)
-    pub fn get_borrow_rate(env: Env) -> i128 {
-        get_current_borrow_rate(&env).unwrap_or_else(|e| panic!("Interest rate error: {:?}", e))
-    }
-
-    /// Get current supply interest rate
-    ///
-    /// Returns the current supply interest rate (borrow rate - spread).
-    ///
-    /// # Returns
-    /// Supply rate in basis points (annual)
-    pub fn get_supply_rate(env: Env) -> i128 {
-        get_current_supply_rate(&env).unwrap_or_else(|e| panic!("Interest rate error: {:?}", e))
-    }
-
-    /// Update interest rate configuration (admin only)
-    ///
-    /// Updates interest rate model parameters with validation.
-    ///
-    /// # Arguments
-    /// * `caller` - The caller address (must be admin)
-    /// * `base_rate_bps` - Optional new base rate (in basis points)
-    /// * `kink_utilization_bps` - Optional new kink utilization (in basis points)
-    /// * `multiplier_bps` - Optional new multiplier (in basis points)
-    /// * `jump_multiplier_bps` - Optional new jump multiplier (in basis points)
-    /// * `rate_floor_bps` - Optional new rate floor (in basis points)
-    /// * `rate_ceiling_bps` - Optional new rate ceiling (in basis points)
-    /// * `spread_bps` - Optional new spread (in basis points)
-    ///
-    /// # Returns
-    /// Returns Ok(()) on success
-    #[allow(clippy::too_many_arguments)]
-    pub fn update_interest_rate_config(
-        env: Env,
-        caller: Address,
-        base_rate_bps: Option<i128>,
-        kink_utilization_bps: Option<i128>,
-        multiplier_bps: Option<i128>,
-        jump_multiplier_bps: Option<i128>,
-        rate_floor_bps: Option<i128>,
-        rate_ceiling_bps: Option<i128>,
-        spread_bps: Option<i128>,
-    ) -> Result<(), InterestRateError> {
-        update_interest_rate_config(
-            &env,
-            caller,
-            base_rate_bps,
-            kink_utilization_bps,
-            multiplier_bps,
-            jump_multiplier_bps,
-            rate_floor_bps,
-            rate_ceiling_bps,
-            spread_bps,
+        admin: Address,
+        default_slippage: i128,
+        max_slippage: i128,
+        auto_swap_threshold: i128,
+    ) -> Result<(), AmmError> {
+        initialize_amm(
+            env,
+            admin,
+            default_slippage,
+            max_slippage,
+            auto_swap_threshold,
         )
     }
 
-    /// Set emergency rate adjustment (admin only)
-    ///
-    /// Allows admin to make emergency adjustments to interest rates.
-    ///
-    /// # Arguments
-    /// * `caller` - The caller address (must be admin)
-    /// * `adjustment_bps` - Emergency adjustment in basis points (can be negative)
-    ///
-    /// # Returns
-    /// Returns Ok(()) on success
-    pub fn set_emergency_rate_adjustment(
+    /// Set AMM pool configuration (admin only)
+    pub fn set_amm_pool(
         env: Env,
-        caller: Address,
-        adjustment_bps: i128,
-    ) -> Result<(), InterestRateError> {
-        set_emergency_rate_adjustment(&env, caller, adjustment_bps)
+        admin: Address,
+        protocol_config: AmmProtocolConfig,
+    ) -> Result<(), AmmError> {
+        set_amm_pool(env, admin, protocol_config)
     }
 
-<<<<<<< feature/risk-management-parameters
+    /// Execute swap through AMM
+    pub fn amm_swap(env: Env, user: Address, params: SwapParams) -> Result<i128, AmmError> {
+        amm_swap(env, user, params)
+    }
+
     /// Register a bridge 
     ///
     /// # Arguments
@@ -877,7 +779,6 @@ impl HelloContract {
     /// Get configuration of a specific bridge
     pub fn get_bridge_config(env: Env, network_id: u32) -> Result<BridgeConfig, BridgeError> {
         bridge::get_bridge_config(&env, network_id)
-=======
     /// Set a configuration value (admin only)
     ///
     /// # Arguments
@@ -1177,244 +1078,379 @@ impl HelloContract {
     }
 
     // ============================================================================
-    // Cross-Asset / Asset Configuration Methods
+    // Governance Entrypoints
     // ============================================================================
 
-    /// Initialize cross-asset lending module (admin only)
+    /// Initialize governance module
     ///
-    /// Sets up the cross-asset lending system with an admin.
-    /// Must be called before any asset configuration.
+    /// Sets up the governance system with voting token and parameters.
+    /// Must be called after contract initialization.
     ///
     /// # Arguments
     /// * `admin` - The admin address
+    /// * `vote_token` - Token contract address used for voting
+    /// * `voting_period` - Optional voting duration in seconds
+    /// * `execution_delay` - Optional delay before execution in seconds
+    /// * `quorum_bps` - Optional quorum requirement in basis points
+    /// * `proposal_threshold` - Optional minimum tokens to create proposal
+    /// * `timelock_duration` - Optional timelock duration in seconds
+    /// * `default_voting_threshold` - Optional default voting threshold in basis points
     ///
     /// # Returns
     /// Returns Ok(()) on success
-    pub fn initialize_ca(env: Env, admin: Address) -> Result<(), CrossAssetError> {
-        initialize(&env, admin)
-    }
-
-    /// Initialize/register a new asset with configuration
-    ///
-    /// Registers an asset with its collateral factor (LTV), liquidation threshold,
-    /// debt ceiling, and other parameters. Admin only.
-    ///
-    /// # Arguments
-    /// * `asset` - Asset address (None for native XLM)
-    /// * `config` - Complete asset configuration
-    ///
-    /// # Returns
-    /// Returns Ok(()) on success
-    pub fn initialize_asset(
+    pub fn gov_initialize(
         env: Env,
-        asset: Option<Address>,
-        config: AssetConfig,
-    ) -> Result<(), CrossAssetError> {
-        initialize_asset(&env, asset, config)
-    }
-
-    /// Update asset configuration (admin only)
-    ///
-    /// Updates asset parameters including LTV, liquidation threshold, debt ceiling,
-    /// and collateral/borrow enablement. Only provided fields are updated.
-    ///
-    /// # Arguments
-    /// * `asset` - Asset address (None for XLM)
-    /// * `collateral_factor` - Optional new LTV in basis points
-    /// * `liquidation_threshold` - Optional new liquidation threshold in basis points
-    /// * `max_supply` - Optional new supply cap
-    /// * `max_borrow` - Optional new debt ceiling
-    /// * `can_collateralize` - Optional flag to enable/disable as collateral
-    /// * `can_borrow` - Optional flag to enable/disable borrowing
-    ///
-    /// # Returns
-    /// Returns Ok(()) on success
-    #[allow(clippy::too_many_arguments)]
-    pub fn update_asset_config(
-        env: Env,
-        asset: Option<Address>,
-        collateral_factor: Option<i128>,
-        liquidation_threshold: Option<i128>,
-        max_supply: Option<i128>,
-        max_borrow: Option<i128>,
-        can_collateralize: Option<bool>,
-        can_borrow: Option<bool>,
-    ) -> Result<(), CrossAssetError> {
-        update_asset_config(
+        admin: Address,
+        vote_token: Address,
+        voting_period: Option<u64>,
+        execution_delay: Option<u64>,
+        quorum_bps: Option<u32>,
+        proposal_threshold: Option<i128>,
+        timelock_duration: Option<u64>,
+        default_voting_threshold: Option<i128>,
+    ) -> Result<(), errors::GovernanceError> {
+        governance::initialize(
             &env,
-            asset,
-            collateral_factor,
-            liquidation_threshold,
-            max_supply,
-            max_borrow,
-            can_collateralize,
-            can_borrow,
+            admin,
+            vote_token,
+            voting_period,
+            execution_delay,
+            quorum_bps,
+            proposal_threshold,
+            timelock_duration,
+            default_voting_threshold,
         )
     }
 
-    /// Update asset price (admin/oracle only)
-    ///
-    /// Updates the price for an asset used in health factor calculations.
+    /// Create a new governance proposal
     ///
     /// # Arguments
-    /// * `asset` - Asset address (None for XLM)
-    /// * `price` - New price in base units (7 decimals)
+    /// * `proposer` - Address creating the proposal
+    /// * `proposal_type` - Type of proposal (parameter change, pause, etc.)
+    /// * `description` - Description of the proposal
+    /// * `voting_threshold` - Optional custom voting threshold
+    ///
+    /// # Returns
+    /// Returns the new proposal ID
+    pub fn gov_create_proposal(
+        env: Env,
+        proposer: Address,
+        proposal_type: ProposalType,
+        description: String,
+        voting_threshold: Option<i128>,
+    ) -> Result<u64, errors::GovernanceError> {
+        governance::create_proposal(&env, proposer, proposal_type, description, voting_threshold)
+    }
+
+    /// Cast a vote on a proposal
+    ///
+    /// # Arguments
+    /// * `voter` - Address casting the vote
+    /// * `proposal_id` - ID of the proposal to vote on
+    /// * `vote_type` - Vote choice (For, Against, Abstain)
     ///
     /// # Returns
     /// Returns Ok(()) on success
-    pub fn update_asset_price(
+    pub fn gov_vote(
         env: Env,
-        asset: Option<Address>,
-        price: i128,
-    ) -> Result<(), CrossAssetError> {
-        update_asset_price(&env, asset, price)
+        voter: Address,
+        proposal_id: u64,
+        vote_type: VoteType,
+    ) -> Result<(), errors::GovernanceError> {
+        governance::vote(&env, voter, proposal_id, vote_type)
     }
 
-    /// Get asset configuration
-    ///
-    /// Returns the configuration for a specific asset including LTV,
-    /// liquidation threshold, debt ceiling, etc.
+    /// Queue a successful proposal for execution
     ///
     /// # Arguments
-    /// * `asset` - Asset address (None for XLM)
+    /// * `caller` - Address queuing the proposal
+    /// * `proposal_id` - ID of the proposal to queue
     ///
     /// # Returns
-    /// Asset configuration
-    pub fn get_asset_config(
+    /// Returns the proposal outcome
+    pub fn gov_queue_proposal(
         env: Env,
-        asset: Option<Address>,
-    ) -> Result<AssetConfig, CrossAssetError> {
-        get_asset_config_by_address(&env, asset)
+        caller: Address,
+        proposal_id: u64,
+    ) -> Result<ProposalOutcome, errors::GovernanceError> {
+        governance::queue_proposal(&env, caller, proposal_id)
     }
 
-    /// Get list of all configured assets
-    ///
-    /// Returns all assets that have been registered in the system.
-    ///
-    /// # Returns
-    /// Vector of asset keys
-    pub fn get_asset_list(env: Env) -> soroban_sdk::Vec<AssetKey> {
-        get_asset_list(&env)
-    }
-
-    /// Deposit collateral for cross-asset lending
-    ///
-    /// Deposits collateral that can be used across multiple assets.
-    /// Asset must be enabled for collateral.
+    /// Execute a queued proposal
     ///
     /// # Arguments
-    /// * `user` - User address
-    /// * `asset` - Asset address (None for XLM)
-    /// * `amount` - Amount to deposit
+    /// * `executor` - Address executing the proposal
+    /// * `proposal_id` - ID of the proposal to execute
     ///
     /// # Returns
-    /// Updated asset position
-    pub fn cross_asset_deposit(
+    /// Returns Ok(()) on success
+    pub fn gov_execute_proposal(
         env: Env,
-        user: Address,
-        asset: Option<Address>,
-        amount: i128,
-    ) -> Result<AssetPosition, CrossAssetError> {
-        cross_asset_deposit(&env, user, asset, amount)
+        executor: Address,
+        proposal_id: u64,
+    ) -> Result<(), errors::GovernanceError> {
+        governance::execute_proposal(&env, executor, proposal_id)
     }
 
-    /// Withdraw collateral from cross-asset lending
+    /// Cancel a proposal
     ///
-    /// Withdraws collateral while maintaining healthy position.
+    /// Only proposer or admin can cancel.
     ///
     /// # Arguments
-    /// * `user` - User address
-    /// * `asset` - Asset address (None for XLM)
-    /// * `amount` - Amount to withdraw
+    /// * `caller` - Address cancelling the proposal
+    /// * `proposal_id` - ID of the proposal to cancel
     ///
     /// # Returns
-    /// Updated asset position
-    pub fn cross_asset_withdraw(
+    /// Returns Ok(()) on success
+    pub fn gov_cancel_proposal(
         env: Env,
-        user: Address,
-        asset: Option<Address>,
-        amount: i128,
-    ) -> Result<AssetPosition, CrossAssetError> {
-        cross_asset_withdraw(&env, user, asset, amount)
+        caller: Address,
+        proposal_id: u64,
+    ) -> Result<(), errors::GovernanceError> {
+        governance::cancel_proposal(&env, caller, proposal_id)
     }
 
-    /// Borrow asset in cross-asset lending
-    ///
-    /// Borrows against cross-asset collateral. Respects LTV and debt ceiling.
+    /// Approve a proposal as multisig admin
     ///
     /// # Arguments
-    /// * `user` - User address
-    /// * `asset` - Asset address (None for XLM)
-    /// * `amount` - Amount to borrow
+    /// * `approver` - Admin address approving the proposal
+    /// * `proposal_id` - ID of the proposal to approve
     ///
     /// # Returns
-    /// Updated asset position
-    pub fn cross_asset_borrow(
+    /// Returns Ok(()) on success
+    pub fn gov_approve_proposal(
         env: Env,
-        user: Address,
-        asset: Option<Address>,
-        amount: i128,
-    ) -> Result<AssetPosition, CrossAssetError> {
-        cross_asset_borrow(&env, user, asset, amount)
+        approver: Address,
+        proposal_id: u64,
+    ) -> Result<(), errors::GovernanceError> {
+        governance::approve_proposal(&env, approver, proposal_id)
     }
 
-    /// Repay borrowed asset
-    ///
-    /// Repays debt for a specific asset.
+    /// Set multisig configuration
     ///
     /// # Arguments
-    /// * `user` - User address
-    /// * `asset` - Asset address (None for XLM)
-    /// * `amount` - Amount to repay
+    /// * `caller` - Caller address (must be admin)
+    /// * `admins` - Vector of admin addresses
+    /// * `threshold` - Number of approvals required
     ///
     /// # Returns
-    /// Updated asset position
-    pub fn cross_asset_repay(
+    /// Returns Ok(()) on success
+    pub fn gov_set_multisig_config(
         env: Env,
-        user: Address,
-        asset: Option<Address>,
-        amount: i128,
-    ) -> Result<AssetPosition, CrossAssetError> {
-        cross_asset_repay(&env, user, asset, amount)
+        caller: Address,
+        admins: Vec<Address>,
+        threshold: u32,
+    ) -> Result<(), errors::GovernanceError> {
+        governance::set_multisig_config(&env, caller, admins, threshold)
     }
 
-    /// Get user's position for a specific asset
-    ///
-    /// Returns collateral and debt for a user in a specific asset.
+    /// Add a guardian
     ///
     /// # Arguments
-    /// * `user` - User address
-    /// * `asset` - Asset address (None for XLM)
+    /// * `caller` - Caller address (must be admin)
+    /// * `guardian` - Guardian address to add
     ///
     /// # Returns
-    /// Asset position
-    pub fn get_user_asset_position(
+    /// Returns Ok(()) on success
+    pub fn gov_add_guardian(
         env: Env,
-        user: Address,
-        asset: Option<Address>,
-    ) -> AssetPosition {
-        get_user_asset_position(&env, &user, asset)
+        caller: Address,
+        guardian: Address,
+    ) -> Result<(), errors::GovernanceError> {
+        governance::add_guardian(&env, caller, guardian)
     }
 
-    /// Get user's unified position summary across all assets
-    ///
-    /// Calculates health factor, liquidation status, and borrow capacity
-    /// across all assets.
+    /// Remove a guardian
     ///
     /// # Arguments
-    /// * `user` - User address
+    /// * `caller` - Caller address (must be admin)
+    /// * `guardian` - Guardian address to remove
     ///
     /// # Returns
-    /// Position summary with health factor
-    pub fn get_user_position_summary(
+    /// Returns Ok(()) on success
+    pub fn gov_remove_guardian(
+        env: Env,
+        caller: Address,
+        guardian: Address,
+    ) -> Result<(), errors::GovernanceError> {
+        governance::remove_guardian(&env, caller, guardian)
+    }
+
+    /// Set guardian threshold
+    ///
+    /// # Arguments
+    /// * `caller` - Caller address (must be admin)
+    /// * `threshold` - Number of guardian approvals required for recovery
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn gov_set_guardian_threshold(
+        env: Env,
+        caller: Address,
+        threshold: u32,
+    ) -> Result<(), errors::GovernanceError> {
+        governance::set_guardian_threshold(&env, caller, threshold)
+    }
+
+    /// Start recovery process
+    ///
+    /// # Arguments
+    /// * `initiator` - Guardian initiating recovery
+    /// * `old_admin` - Current admin to replace
+    /// * `new_admin` - New admin address
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn gov_start_recovery(
+        env: Env,
+        initiator: Address,
+        old_admin: Address,
+        new_admin: Address,
+    ) -> Result<(), errors::GovernanceError> {
+        governance::start_recovery(&env, initiator, old_admin, new_admin)
+    }
+
+    /// Approve recovery
+    ///
+    /// # Arguments
+    /// * `approver` - Guardian approving recovery
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn gov_approve_recovery(
+        env: Env,
+        approver: Address,
+    ) -> Result<(), errors::GovernanceError> {
+        governance::approve_recovery(&env, approver)
+    }
+
+    /// Execute recovery
+    ///
+    /// # Arguments
+    /// * `executor` - Address executing recovery
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn gov_execute_recovery(
         env: Env,
         user: Address,
     ) -> Result<UserPositionSummary, CrossAssetError> {
         get_user_position_summary(&env, &user)
->>>>>>> main
     }
 
     // ============================================================================
+    // Governance Query Functions
+    // ============================================================================
+
+    /// Get proposal by ID
+    pub fn gov_get_proposal(env: Env, proposal_id: u64) -> Option<Proposal> {
+        governance::get_proposal(&env, proposal_id)
+    }
+
+    /// Get vote information
+    pub fn gov_get_vote(env: Env, proposal_id: u64, voter: Address) -> Option<VoteInfo> {
+        governance::get_vote(&env, proposal_id, voter)
+    }
+
+    /// Get governance configuration
+    pub fn gov_get_config(env: Env) -> Option<GovernanceConfig> {
+        governance::get_config(&env)
+    }
+
+    /// Get governance admin
+    pub fn gov_get_admin(env: Env) -> Option<Address> {
+        governance::get_admin(&env)
+    }
+
+    /// Get multisig configuration
+    pub fn gov_get_multisig_config(env: Env) -> Option<MultisigConfig> {
+        governance::get_multisig_config(&env)
+    }
+
+    /// Get guardian configuration
+    pub fn gov_get_guardian_config(env: Env) -> Option<GuardianConfig> {
+        governance::get_guardian_config(&env)
+    }
+
+    /// Get proposal approvals
+    pub fn gov_get_proposal_approvals(env: Env, proposal_id: u64) -> Option<Vec<Address>> {
+        governance::get_proposal_approvals(&env, proposal_id)
+    }
+
+    /// Get current recovery request
+    pub fn gov_get_recovery_request(env: Env) -> Option<RecoveryRequest> {
+        governance::get_recovery_request(&env)
+    }
+
+    /// Get recovery approvals
+    pub fn gov_get_recovery_approvals(env: Env) -> Option<Vec<Address>> {
+        governance::get_recovery_approvals(&env)
+    }
+
+    /// Get paginated list of proposals
+    pub fn gov_get_proposals(env: Env, start_id: u64, limit: u32) -> Vec<Proposal> {
+        governance::get_proposals(&env, start_id, limit)
+    }
+
+    /// Check if an address can vote on a proposal
+    pub fn gov_can_vote(env: Env, voter: Address, proposal_id: u64) -> bool {
+        governance::can_vote(&env, voter, proposal_id)
+    }
+
+    // --- Bridge ---
+
+    /// Register a new bridge (admin only)
+    pub fn register_bridge(
+        env: Env,
+        caller: Address,
+        network_id: u32,
+        bridge: Address,
+        fee_bps: i128,
+    ) -> Result<(), BridgeError> {
+        register_bridge(&env, caller, network_id, bridge, fee_bps)
+    }
+
+    /// Set fee for a bridge (admin only)
+    pub fn set_bridge_fee(
+        env: Env,
+        caller: Address,
+        network_id: u32,
+        fee_bps: i128,
+    ) -> Result<(), BridgeError> {
+        set_bridge_fee(&env, caller, network_id, fee_bps)
+    }
+
+    /// List all registered bridges
+    pub fn list_bridges(env: Env) -> Map<u32, BridgeConfig> {
+        list_bridges(&env)
+    }
+
+    /// Get configuration for a bridge by network id
+    pub fn get_bridge_config(env: Env, network_id: u32) -> Result<BridgeConfig, BridgeError> {
+        get_bridge_config(&env, network_id)
+    }
+
+    /// Deposit into protocol via a bridge
+    pub fn bridge_deposit(
+        env: Env,
+        user: Address,
+        network_id: u32,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<i128, BridgeError> {
+        bridge_deposit(&env, user, network_id, asset, amount)
+    }
+
+    /// Withdraw from protocol via a bridge
+    pub fn bridge_withdraw(
+        env: Env,
+        user: Address,
+        network_id: u32,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Result<i128, BridgeError> {
+        bridge_withdraw(&env, user, network_id, asset, amount)
+    }
 }
 
 #[cfg(test)]

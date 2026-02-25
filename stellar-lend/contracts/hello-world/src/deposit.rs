@@ -56,22 +56,32 @@ pub enum DepositError {
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum DepositDataKey {
-    /// User collateral balances: Map<Address, I128>
+    /// User collateral balance (legacy)
+    /// Value type: i128
     CollateralBalance(Address),
-    /// Asset parameters: Map<Address, AssetParams>
+    /// Asset-specific parameters (legacy)
+    /// Value type: AssetParams
     AssetParams(Address),
-    /// Pause switches: Map<Symbol, bool>
+    /// Legacy operation pause switches: Map<Symbol, bool>
     PauseSwitches,
-    /// Admin address
+    /// Protocol admin address
+    /// Value type: Address
     Admin,
-    /// User positions: Map<Address, Position>
+    /// User's unified position tracking
+    /// Value type: Position
     Position(Address),
-    /// Protocol analytics
+    /// Global protocol analytics (TVL, aggregate borrows/deposits)
+    /// Value type: ProtocolAnalytics
     ProtocolAnalytics,
-    /// User analytics: Map<Address, UserAnalytics>
+    /// Granular per-user analytics metrics
+    /// Value type: UserAnalytics
     UserAnalytics(Address),
-    /// Activity log: Vec<Activity>
+    /// Bounded log of recent deposit activities: Vec<Activity>
     ActivityLog,
+    /// Protocol reserve per asset: Map<Option<Address>, i128>
+    ProtocolReserve(Option<Address>),
+    /// Native asset (XLM) contract address
+    NativeAssetAddress,
 }
 
 /// Asset parameters for collateral
@@ -84,6 +94,8 @@ pub struct AssetParams {
     pub collateral_factor: i128,
     /// Maximum deposit amount
     pub max_deposit: i128,
+    /// Borrow fee in basis points (e.g., 50 = 0.5%)
+    pub borrow_fee_bps: i128,
 }
 
 /// User position tracking
@@ -349,6 +361,27 @@ pub fn deposit_collateral(
     emit_user_activity_tracked_event(env, &user, Symbol::new(env, "deposit"), amount, timestamp);
 
     Ok(new_collateral)
+}
+
+/// Set the native asset address (admin only).
+/// Required for deposit/borrow/repay with asset = None. Must be called before using None as asset.
+pub fn set_native_asset_address(
+    env: &Env,
+    caller: Address,
+    native_asset: Address,
+) -> Result<(), DepositError> {
+    let admin = crate::admin::get_admin(env).ok_or(DepositError::InvalidAsset)?;
+    if caller != admin {
+        return Err(DepositError::InvalidAsset);
+    }
+    caller.require_auth();
+    if native_asset == env.current_contract_address() {
+        return Err(DepositError::InvalidAsset);
+    }
+    env.storage()
+        .persistent()
+        .set(&DepositDataKey::NativeAssetAddress, &native_asset);
+    Ok(())
 }
 
 /// Update user analytics after deposit

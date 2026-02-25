@@ -49,15 +49,19 @@ pub enum AnalyticsError {
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum AnalyticsDataKey {
-    /// Cached protocol-wide metrics snapshot
+    /// Cached snapshot of global protocol-wide metrics
+    /// Value type: ProtocolMetrics
     ProtocolMetrics,
-    /// Per-user computed metrics
+    /// Detailed cached metrics for a specific user
+    /// Value type: UserMetrics
     UserMetrics(Address),
-    /// Bounded activity log (max 10,000 entries)
+    /// Global bounded activity log (max 10,000 entries): Vec<ActivityEntry>
     ActivityLog,
-    /// Count of unique users that have interacted with the protocol
+    /// Cumulative count of unique protocol users
+    /// Value type: u64
     TotalUsers,
-    /// Total number of transactions across all users
+    /// Cumulative count of all protocol transactions
+    /// Value type: u64
     TotalTransactions,
 }
 

@@ -102,9 +102,11 @@ fn test_analytics_utilization_zero_when_no_deposits() {
 
 #[test]
 fn test_analytics_user_report_after_repay() {
-    let env = create_test_env();
-    let (_contract_id, _admin, client) = setup_contract_with_admin(&env);
-    let user = Address::generate(&env);
+    let (env, contract_id, client, _admin, user, native_asset) =
+        crate::tests::test_helpers::setup_env_with_native_asset();
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_asset);
+    token_client.mint(&user, &1000);
+    token_client.approve(&user, &contract_id, &1000, &(env.ledger().sequence() + 100));
 
     client.deposit_collateral(&user, &None, &5000);
     client.borrow_asset(&user, &None, &1000);

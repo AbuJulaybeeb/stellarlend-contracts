@@ -114,13 +114,23 @@ pub enum CrossAssetError {
     NotAuthorized = 10,
 }
 
-// Storage keys - using Symbol for type-safe storage keys
-const ASSET_CONFIGS: Symbol = symbol_short!("configs");
-const USER_POSITIONS: Symbol = symbol_short!("positions");
-const TOTAL_SUPPLIES: Symbol = symbol_short!("supplies");
-const TOTAL_BORROWS: Symbol = symbol_short!("borrows");
-const ASSET_LIST: Symbol = symbol_short!("assets");
+/// Admin address authorized for protocol management
 const ADMIN: Symbol = symbol_short!("admin");
+
+/// Storage key for the map of asset configurations: Map<AssetKey, AssetConfig>
+const ASSET_CONFIGS: Symbol = symbol_short!("configs");
+
+/// Storage key for the map of user positions: Map<UserAssetKey, AssetPosition>
+const USER_POSITIONS: Symbol = symbol_short!("positions");
+
+/// Storage key for the map of total supplies per asset: Map<AssetKey, i128>
+const TOTAL_SUPPLIES: Symbol = symbol_short!("supplies");
+
+/// Storage key for the map of total borrows per asset: Map<AssetKey, i128>
+const TOTAL_BORROWS: Symbol = symbol_short!("borrows");
+
+/// Storage key for the global list of registered assets: Vec<AssetKey>
+const ASSET_LIST: Symbol = symbol_short!("assets");
 
 /// Initialize the cross-asset lending module.
 ///

@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contracttype, Address, Env, Symbol};
+use soroban_sdk::{contracterror, contractevent, contracttype, Address, Env};
 
 use crate::deposit::{DepositCollateral, DepositDataKey};
 
@@ -23,7 +23,7 @@ pub enum WithdrawDataKey {
 }
 
 /// Withdraw event data
-#[contracttype]
+#[contractevent]
 #[derive(Clone, Debug)]
 pub struct WithdrawEvent {
     pub user: Address,
@@ -92,7 +92,14 @@ pub fn withdraw(
     let new_total = total_deposits.checked_sub(amount).unwrap_or(0);
     set_total_deposits(env, new_total);
 
-    emit_withdraw_event(env, user, asset, amount, new_amount);
+    WithdrawEvent {
+        user,
+        asset,
+        amount,
+        remaining_balance: new_amount,
+        timestamp: env.ledger().timestamp(),
+    }
+    .publish(env);
 
     Ok(new_amount)
 }
@@ -196,21 +203,4 @@ fn is_paused(env: &Env) -> bool {
         .persistent()
         .get(&WithdrawDataKey::Paused)
         .unwrap_or(false)
-}
-
-fn emit_withdraw_event(
-    env: &Env,
-    user: Address,
-    asset: Address,
-    amount: i128,
-    remaining_balance: i128,
-) {
-    let event = WithdrawEvent {
-        user,
-        asset,
-        amount,
-        remaining_balance,
-        timestamp: env.ledger().timestamp(),
-    };
-    env.events().publish((Symbol::new(env, "withdraw"),), event);
 }

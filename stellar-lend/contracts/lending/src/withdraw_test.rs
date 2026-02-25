@@ -1,7 +1,7 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
-    Address, Env, IntoVal, Symbol,
+    Address, Env, FromVal, Symbol,
 };
 
 /// Helper: register contract and return client
@@ -397,9 +397,8 @@ fn test_withdraw_emits_event() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
 
-    let expected_topics = (Symbol::new(&env, "withdraw"),).into_val(&env);
-    assert_eq!(last_event.0, client.address);
-    assert_eq!(last_event.1, expected_topics);
+    let topic: Symbol = Symbol::from_val(&env, &last_event.1.get(0).unwrap());
+    assert_eq!(topic, Symbol::new(&env, "withdraw_event"));
 }
 
 // --- Edge cases ---

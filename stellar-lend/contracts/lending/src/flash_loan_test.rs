@@ -45,7 +45,9 @@ fn test_flash_loan_success() {
     let client = LendingContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
-    let asset = env.register_stellar_asset_contract(admin.clone());
+    let asset = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
     let token_admin = token::StellarAssetClient::new(&env, &asset);
 
     // Register receiver
@@ -84,7 +86,9 @@ fn test_flash_loan_insufficient_repayment() {
     let client = LendingContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
-    let asset = env.register_stellar_asset_contract(admin.clone());
+    let asset = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
     let token_admin = token::StellarAssetClient::new(&env, &asset);
 
     let receiver_id = env.register(FlashLoanReceiver, ());
@@ -166,7 +170,9 @@ fn test_flash_loan_reentrancy() {
     let client = LendingContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
-    let asset = env.register_stellar_asset_contract(admin.clone());
+    let asset = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
     let token_admin = token::StellarAssetClient::new(&env, &asset);
 
     let receiver_id = env.register(ReentrantFlashLoanReceiver, ());

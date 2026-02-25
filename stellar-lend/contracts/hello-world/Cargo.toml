@@ -11,6 +11,7 @@ doctest = false
 [dependencies]
 soroban-sdk = { workspace = true }
 soroban-token-sdk = { workspace = true }
+stellarlend-amm = { path = "../amm" }
 stellar-contract-utils = { version = "0.6.0" }
 stellar-macros = { version = "0.6.0" }
 
